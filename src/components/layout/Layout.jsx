@@ -5,8 +5,8 @@ import  NAV  from "../../data/nav";
 import {
   Briefcase, ChevronRight, LogOut, Menu, Bell
 } from "lucide-react";
-import Avatar from "../../components/Avatar/Avatar";
-import Badge from "../../components/Badge/Badge";
+import Avatar from "../components/avatar/Avatar";
+import Badge from "../components/badge/Badge";
 
 const Layout = ({ user, page, setPage, onLogout, children }) => {
   const [collapsed, setCollapsed] = useState(false);
