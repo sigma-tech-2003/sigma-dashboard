@@ -2,7 +2,7 @@ import "./LoginPage.css";
 import { useState } from "react";
 import { T } from "../../theme/theme";
 import { Briefcase } from "lucide-react";
-import Input from "../../components/Input/Input";
+import Input from "../../components/input/Input";
 
 const LoginPage = ({ onLogin, employees }) => {
   const [email, setEmail] = useState("");
