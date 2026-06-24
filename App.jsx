@@ -86,12 +86,12 @@ export default function App() {
     async function init() {
       // STEP 1: Seed the database if this is the first run
       try {
-        // const seeded = await isSeeded();
-        // if (!seeded) {
-        //   setSeeding(true);
-        //   await seedAll();
-        //   setSeeding(false);
-        // }
+        const seeded = await isSeeded();
+        if (!seeded) {
+          setSeeding(true);
+          await seedAll();
+          setSeeding(false);
+        }
       } catch (err) {
         console.warn("Seed check failed:", err);
         setSeeding(false);
