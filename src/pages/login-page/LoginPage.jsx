@@ -17,6 +17,7 @@ const LoginPage = ({ onLogin, employees }) => {
   ];
 
   const handleLogin = () => {
+    console.log("Employees:", employees);
     setLoading(true);
     setErr("");
     setTimeout(() => {
