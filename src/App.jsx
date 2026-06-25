@@ -42,10 +42,6 @@ async function verifyUserRole(savedUser) {
   // If user or user.id is missing, return null
   if (!savedUser?.id) return null;
 
-  console.log("savedUser =", savedUser);
-  console.log("savedUser.id =", savedUser.id);
-  console.log("typeof id =", typeof savedUser.id);
-
   try {
     // Look up this user in the employees collection in Firestore
     const empRef = doc(db, "employees", String(savedUser.id));
