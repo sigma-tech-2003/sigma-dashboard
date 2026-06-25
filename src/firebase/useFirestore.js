@@ -34,7 +34,7 @@ function useCollection(collectionName, orderByField = null) {
           setLoading(false);
         });
       } else {
-        setLoading(true);
+        setLoading(false);
       }
     });
 
@@ -159,7 +159,7 @@ export function useLeaveBalances() {
           setLoading(false);
         });
       } else {
-        setLoading(true);
+        setLoading(false);
       }
     });
 
