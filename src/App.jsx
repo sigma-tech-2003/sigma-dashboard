@@ -79,14 +79,6 @@ export default function App() {
   const { payroll, loading: loadPay, addPayroll, updatePayrollStatus } = usePayroll();
   const { leaveBalances, loading: loadBal } = useLeaveBalances();
 
-  console.log("Loading Status:", {
-  loadEmp,
-  loadKpi,
-  loadLv,
-  loadPay,
-  loadBal
-});
-
   const loading = loadEmp || loadKpi || loadLv || loadPay || loadBal;
 
   // ── On app start: seed the database + verify the session ─────────
