@@ -1,7 +1,8 @@
 // src/firebase/useFirestore.js
 import { useState, useEffect, useCallback } from "react";
-import { db, auth } from "./firebaseConfig";
-import { onAuthStateChanged } from "firebase/auth";
+// import { db, auth } from "./firebaseConfig";
+// import { onAuthStateChanged } from "firebase/auth";
+import { db } from "./firebaseConfig";
 import {
   collection,
   onSnapshot,
@@ -21,34 +22,54 @@ function useCollection(collectionName, orderByField = null) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let unsubFirestore = null;
+    // let unsubFirestore = null;
 
     // ✅ Pehle Auth ready hone ka wait karo, phir data load karo
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        const ref = collection(db, collectionName);
-        const q = orderByField ? query(ref, orderBy(orderByField)) : ref;
+    // const unsubAuth = onAuthStateChanged(auth, (user) => {
+    //   if (user) {
+    //     const ref = collection(db, collectionName);
+    //     const q = orderByField ? query(ref, orderBy(orderByField)) : ref;
 
-        unsubFirestore = onSnapshot(q, (snap) => {
-          console.log(
-            "Collection:",
-            collectionName,
-            "Docs:",
-            snap.docs.length
-          );
-          setData(snap.docs.map((d) => ({ ...d.data(), _docId: d.id })));
-          setLoading(false);
-        });
-      } else {
-        setLoading(false);
-      }
+    //     unsubFirestore = onSnapshot(q, (snap) => {
+    //       console.log(
+    //         "Collection:",
+    //         collectionName,
+    //         "Docs:",
+    //         snap.docs.length
+    //       );
+    //       setData(snap.docs.map((d) => ({ ...d.data(), _docId: d.id })));
+    //       setLoading(false);
+    //     });
+    //   } else {
+    //     setLoading(false);
+    //   }
+    // });
+
+    const ref = collection(db, collectionName);
+    const q = orderByField ? query(ref, orderBy(orderByField)) : ref;
+
+    const unsubFirestore = onSnapshot(q, (snap) => {
+      console.log("Collection:", collectionName, "Docs:", snap.docs.length);
+
+      setData(
+        snap.docs.map((d) => ({
+          ...d.data(),
+          _docId: d.id,
+        }))
+      );
+
+      setLoading(false);
     });
 
-    return () => {
-      unsubAuth();
-      if (unsubFirestore) unsubFirestore();
-    };
-  }, [collectionName, orderByField]);
+    return () => unsubFirestore();
+
+    //   return () => {
+    //     unsubAuth();
+    //     if (unsubFirestore) unsubFirestore();
+    //   };
+    // }, 
+
+    [collectionName, orderByField]);
 
   return { data, loading };
 }
@@ -152,27 +173,43 @@ export function useLeaveBalances() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let unsubFirestore = null;
+    // let unsubFirestore = null;
 
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        unsubFirestore = onSnapshot(collection(db, "leaveBalances"), (snap) => {
-          const obj = {};
-          snap.docs.forEach((d) => {
-            obj[d.id] = d.data();
-          });
-          setLeaveBalances(obj);
-          setLoading(false);
+    // const unsubAuth = onAuthStateChanged(auth, (user) => {
+    //   if (user) {
+    //     unsubFirestore = onSnapshot(collection(db, "leaveBalances"), (snap) => {
+    //       const obj = {};
+    //       snap.docs.forEach((d) => {
+    //         obj[d.id] = d.data();
+    //       });
+    //       setLeaveBalances(obj);
+    //       setLoading(false);
+    //     });
+    //   } else {
+    //     setLoading(false);
+    //   }
+    // });
+
+    // return () => {
+    //   unsubAuth();
+    //   if (unsubFirestore) unsubFirestore();
+    // };
+
+    const unsubFirestore = onSnapshot(
+      collection(db, "leaveBalances"),
+      (snap) => {
+        const obj = {};
+
+        snap.docs.forEach((d) => {
+          obj[d.id] = d.data();
         });
-      } else {
+
+        setLeaveBalances(obj);
         setLoading(false);
       }
-    });
+    );
 
-    return () => {
-      unsubAuth();
-      if (unsubFirestore) unsubFirestore();
-    };
+    return () => unsubFirestore();
   }, []);
 
   return { leaveBalances, loading };
