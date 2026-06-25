@@ -42,6 +42,10 @@ async function verifyUserRole(savedUser) {
   // If user or user.id is missing, return null
   if (!savedUser?.id) return null;
 
+  console.log("savedUser =", savedUser);
+  console.log("savedUser.id =", savedUser.id);
+  console.log("typeof id =", typeof savedUser.id);
+
   try {
     // Look up this user in the employees collection in Firestore
     const empRef = doc(db, "employees", savedUser.id);
@@ -127,8 +131,8 @@ export default function App() {
   }, []);
 
   // ── Loading / Verifying states ────────────────────────────────────
-  if (seeding)          return <LoadingScreen message="Setting up your database…" />;
-  if (verifying)        return <LoadingScreen message="Verifying your session…" />; // ✅ New
+  if (seeding) return <LoadingScreen message="Setting up your database…" />;
+  if (verifying) return <LoadingScreen message="Verifying your session…" />; // ✅ New
   if (loading && !user) return <LoadingScreen message="Connecting to Firebase…" />;
 
   // ── Auth gate ─────────────────────────────────────────────────────
@@ -172,12 +176,12 @@ export default function App() {
 
   return (
     <Layout user={user} page={page} setPage={setPage} onLogout={onLogout}>
-      {page === "dashboard"  &&                       <Dashboard      {...sharedProps} />}
-      {page === "employees"  && isAdminOrHR &&        <EmployeesPage  {...sharedProps} />}
-      {page === "kpi"        &&                       <KPIPage        {...sharedProps} />}
-      {page === "leave"      &&                       <LeavePage      {...sharedProps} />}
-      {page === "payroll"    && isAdminOrHR &&        <PayrollPage    {...sharedProps} />}
-      {page === "payslips"   && user.role === "employee" && <MyPayslipsPage {...sharedProps} />}
+      {page === "dashboard" && <Dashboard      {...sharedProps} />}
+      {page === "employees" && isAdminOrHR && <EmployeesPage  {...sharedProps} />}
+      {page === "kpi" && <KPIPage        {...sharedProps} />}
+      {page === "leave" && <LeavePage      {...sharedProps} />}
+      {page === "payroll" && isAdminOrHR && <PayrollPage    {...sharedProps} />}
+      {page === "payslips" && user.role === "employee" && <MyPayslipsPage {...sharedProps} />}
     </Layout>
   );
 }

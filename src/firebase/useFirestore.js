@@ -50,8 +50,6 @@ function useCollection(collectionName, orderByField = null) {
     const q = orderByField ? query(ref, orderBy(orderByField)) : ref;
 
     const unsubFirestore = onSnapshot(q, (snap) => {
-      console.log("Collection:", collectionName, "Docs:", snap.docs.length);
-
       setData(
         snap.docs.map((d) => ({
           ...d.data(),
