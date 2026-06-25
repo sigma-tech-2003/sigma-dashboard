@@ -48,7 +48,7 @@ async function verifyUserRole(savedUser) {
 
   try {
     // Look up this user in the employees collection in Firestore
-    const empRef = doc(db, "employees", savedUser.id);
+    const empRef = doc(db, "employees", String(savedUser.id));
     const empSnap = await getDoc(empRef);
 
     if (empSnap.exists()) {
