@@ -22,6 +22,7 @@ function useCollection(collectionName, orderByField = null) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    
     // let unsubFirestore = null;
 
     // ✅ Pehle Auth ready hone ka wait karo, phir data load karo
@@ -61,7 +62,13 @@ function useCollection(collectionName, orderByField = null) {
       setLoading(false);
     });
 
-    return () => unsubFirestore();
+    return () => unsubFirestore(); },
+
+     [collectionName, orderByField]);
+
+   return { data, loading };
+  }
+ 
 
     //   return () => {
     //     unsubAuth();
@@ -69,10 +76,10 @@ function useCollection(collectionName, orderByField = null) {
     //   };
     // }, 
 
-    [collectionName, orderByField]);
+//     [collectionName, orderByField]);
 
-  return { data, loading };
-}
+//   return { data, loading };
+// }
 
 // ─── EMPLOYEES ──────────────────────────────────────────────────────────────
 export function useEmployees() {
