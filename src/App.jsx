@@ -16,7 +16,7 @@ import {
 } from "./firebase/useFirestore";
 import { seedAll, isSeeded } from "./firebase/seedFirestore";
 import { auth, db } from "./firebase/firebaseConfig"; // ✅ db also imported
-import { signInAnonymously } from "firebase/auth";
+// import { signInAnonymously } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore"; // ✅ To fetch data from Firestore
 
 // ─── UI Shell ────────────────────────────────────────────────────────────────
