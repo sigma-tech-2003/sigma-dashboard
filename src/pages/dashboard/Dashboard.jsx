@@ -1,28 +1,40 @@
 // src/pages/dashboard/Dashboard.jsx
 import {
-  Users, Calendar, DollarSign, Target, Clock
+  Users, Calendar, DollarSign, Target, Clock, Building2,   // ← Building2 added
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line
+  Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 
-import { T } from "../../theme/theme";
+import { T }          from "../../theme/theme";
 import { fmt, pct, fdate, kpiScore, perfLabel, perfColor } from "../../utils/helpers";
-import Stat     from "../../components/stat/Stat";
-import Badge    from "../../components/badge/Badge";
-import Avatar   from "../../components/avatar/Avatar";
+import Stat        from "../../components/stat/Stat";
+import Badge       from "../../components/badge/Badge";
+import Avatar      from "../../components/avatar/Avatar";
 import ProgressBar from "../../components/ProgressBar/ProgressBar";
 
-const Dashboard = ({ user, employees, kpis, leaves, payroll, leaveBalances }) => {
-  const isAdmin = user.role !== "employee";
-  const myKpis  = kpis.filter(k => k.empId === user.id);
+const Dashboard = ({ user, employees, kpis, leaves, payroll, leaveBalances, departments }) => {
+  const isAdmin  = user.role !== "employee";
+  const myKpis   = kpis.filter(k => k.empId === user.id);
   const myLeaves = leaves.filter(l => l.empId === user.id);
   const myScore  = kpiScore(myKpis);
 
-  const deptData = ["Engineering", "Marketing", "Finance", "Sales", "Design", "Management", "Human Resources"]
-    .map(d => ({ dept: d.slice(0, 4), count: employees.filter(e => e.dept === d && e.status === "active").length }))
-    .filter(d => d.count > 0);
+  // ── Dynamic dept chart data from Firestore departments ─────────
+  // Falls back to deriving from employees if no departments seeded yet
+  const deptData = departments.length > 0
+    ? departments
+        .map(d => ({
+          dept:  d.name.slice(0, 4),
+          count: employees.filter(e => e.dept === d.name && e.status === "active").length,
+        }))
+        .filter(d => d.count > 0)
+    : [...new Set(employees.map(e => e.dept).filter(Boolean))]
+        .map(d => ({
+          dept:  d.slice(0, 4),
+          count: employees.filter(e => e.dept === d && e.status === "active").length,
+        }))
+        .filter(d => d.count > 0);
 
   const payTrend = [
     { m: "Oct", total: 520000 }, { m: "Nov", total: 580000 }, { m: "Dec", total: 640000 },
@@ -32,7 +44,7 @@ const Dashboard = ({ user, employees, kpis, leaves, payroll, leaveBalances }) =>
   const leaveStatus = [
     { name: "Approved", value: leaves.filter(l => l.status === "approved").length, color: T.success },
     { name: "Pending",  value: leaves.filter(l => l.status === "pending").length,  color: T.warning },
-    { name: "Rejected", value: leaves.filter(l => l.status === "rejected").length, color: T.danger },
+    { name: "Rejected", value: leaves.filter(l => l.status === "rejected").length, color: T.danger  },
   ];
 
   const kpiPerf = employees.filter(e => e.role === "employee").map(e => {
@@ -40,8 +52,9 @@ const Dashboard = ({ user, employees, kpis, leaves, payroll, leaveBalances }) =>
     return { name: e.name.split(" ")[0], score: kpiScore(eKpis) };
   }).filter(e => e.score > 0);
 
+  // ─────────────────────────────────────────────────────────────────
   if (!isAdmin) {
-    // ── Employee Dashboard ──────────────────────────────────────────
+    // ── Employee Dashboard ────────────────────────────────────────
     return (
       <div>
         <div style={{ marginBottom: 20 }}>
@@ -52,10 +65,10 @@ const Dashboard = ({ user, employees, kpis, leaves, payroll, leaveBalances }) =>
         </div>
 
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-          <Stat icon={Target}     label="KPI Score"      value={`${myScore}%`}       sub={perfLabel(myScore)}                                                   color={perfColor(myScore)} />
-          <Stat icon={Calendar}   label="Leave Balance"  value={`${leaveBalances[user.id]?.Annual?.r || 15} days`} sub="Annual leave remaining"                color={T.warning} />
-          <Stat icon={Clock}      label="Leave Requests" value={myLeaves.length}      sub={`${myLeaves.filter(l => l.status === "pending").length} pending`}    color={T.primary} />
-          <Stat icon={DollarSign} label="Last Payslip"   value="March 2025"           sub={fmt(payroll.find(p => p.empId === user.id)?.net || 0)}              color={T.success} />
+          <Stat icon={Target}     label="KPI Score"      value={`${myScore}%`}        sub={perfLabel(myScore)}                                                   color={perfColor(myScore)} />
+          <Stat icon={Calendar}   label="Leave Balance"  value={`${leaveBalances[user.id]?.Annual?.r || 15} days`} sub="Annual leave remaining"                color={T.warning}          />
+          <Stat icon={Clock}      label="Leave Requests" value={myLeaves.length}       sub={`${myLeaves.filter(l => l.status === "pending").length} pending`}    color={T.primary}          />
+          <Stat icon={DollarSign} label="Last Payslip"   value="March 2025"            sub={fmt(payroll.find(p => p.empId === user.id)?.net || 0)}              color={T.success}          />
         </div>
 
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20, marginBottom: 16 }}>
@@ -97,22 +110,27 @@ const Dashboard = ({ user, employees, kpis, leaves, payroll, leaveBalances }) =>
     );
   }
 
-  // ── Admin Dashboard ─────────────────────────────────────────────
+  // ── Admin / HR Dashboard ────────────────────────────────────────
   return (
     <div>
+      {/* ── Stat Cards ─────────────────────────────────────────── */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        <Stat icon={Users}      label="Total Employees" value={employees.length}
-          sub={`${employees.filter(e => e.status === "active").length} active`} color={T.primary} />
-        <Stat icon={Calendar}   label="Leave Requests"  value={leaves.filter(l => l.status === "pending").length}
-          sub="Awaiting approval" color={T.warning} />
-        <Stat icon={DollarSign} label="Monthly Payroll" value="PKR 6.6L"
-          sub="March 2025 total" color={T.success} />
+        <Stat icon={Users}      label="Total Employees"   value={employees.length}
+          sub={`${employees.filter(e => e.status === "active").length} active`}   color={T.primary}   />
+        <Stat icon={Building2}  label="Total Departments" value={departments.length}
+          sub={`${departments.filter(d => d.status === "Active").length} active`} color={T.purple}    />  {/* ← new */}
+        <Stat icon={Calendar}   label="Leave Requests"    value={leaves.filter(l => l.status === "pending").length}
+          sub="Awaiting approval"                                                  color={T.warning}   />
+        <Stat icon={DollarSign} label="Monthly Payroll"   value="PKR 6.6L"
+          sub="March 2025 total"                                                   color={T.success}   />
         <Stat icon={Target}     label="Avg KPI Score"
           value={kpis.length ? `${Math.round(kpis.reduce((s, k) => s + pct(k.current, k.target), 0) / kpis.length)}%` : "—"}
-          sub="All employees Q1 2025" color={T.secondary} />
+          sub="All employees Q1 2025"                                              color={T.secondary} />
       </div>
 
+      {/* ── Charts row ─────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 20 }}>
+
         {/* Payroll trend */}
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 16 }}>Payroll Trend (6 months)</div>
@@ -121,7 +139,7 @@ const Dashboard = ({ user, employees, kpis, leaves, payroll, leaveBalances }) =>
               <defs>
                 <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor={T.primary} stopOpacity={0.3} />
-                  <stop offset="95%" stopColor={T.primary} stopOpacity={0} />
+                  <stop offset="95%" stopColor={T.primary} stopOpacity={0}   />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
@@ -134,21 +152,26 @@ const Dashboard = ({ user, employees, kpis, leaves, payroll, leaveBalances }) =>
           </ResponsiveContainer>
         </div>
 
-        {/* Dept bar */}
+        {/* Employees by Department — now dynamic from Firestore */}
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 16 }}>Employees by Department</div>
-          <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={deptData} barSize={20}>
-              <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-              <XAxis dataKey="dept" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }} labelStyle={{ color: T.text }} />
-              <Bar dataKey="count" fill={T.primary} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {deptData.length === 0
+            ? <div style={{ color: T.muted, fontSize: 13, paddingTop: 60, textAlign: "center" }}>No department data yet.</div>
+            : (
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={deptData} barSize={20}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                  <XAxis dataKey="dept" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }} labelStyle={{ color: T.text }} />
+                  <Bar dataKey="count" fill={T.primary} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )
+          }
         </div>
 
-        {/* Leave pie */}
+        {/* Leave status pie */}
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 16 }}>Leave Status Overview</div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -172,7 +195,7 @@ const Dashboard = ({ user, employees, kpis, leaves, payroll, leaveBalances }) =>
         </div>
       </div>
 
-      {/* KPI bar */}
+      {/* ── KPI bar ────────────────────────────────────────────── */}
       <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20, marginBottom: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 16 }}>Employee KPI Performance</div>
         <ResponsiveContainer width="100%" height={140}>
@@ -189,7 +212,7 @@ const Dashboard = ({ user, employees, kpis, leaves, payroll, leaveBalances }) =>
         </ResponsiveContainer>
       </div>
 
-      {/* Pending leaves */}
+      {/* ── Pending Leaves ─────────────────────────────────────── */}
       <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 14 }}>Pending Leave Requests</div>
         {leaves.filter(l => l.status === "pending").length === 0
