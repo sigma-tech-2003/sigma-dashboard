@@ -1,83 +1,50 @@
 // src/firebase/useFirestore.js
+// ✅ Auth-aware: Firestore listeners only start after Firebase Auth confirms a user.
+//    No auth = no data. This works with the locked Firestore rules below.
+
 import { useState, useEffect, useCallback } from "react";
-// import { db, auth } from "./firebaseConfig";
-// import { onAuthStateChanged } from "firebase/auth";
-import { db } from "./firebaseConfig";
+import { db, auth } from "./firebaseConfig";
+import { onAuthStateChanged } from "firebase/auth";
 import {
-  collection,
-  onSnapshot,
-  doc,
-  setDoc,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  orderBy,
-  getDocs,
+  collection, onSnapshot, doc, setDoc,
+  updateDoc, deleteDoc, query, orderBy,
 } from "firebase/firestore";
 
-// ─── Generic collection listener ───────────────────────────────────────────
+// ─── Generic auth-aware collection listener ─────────────────────────────────
 function useCollection(collectionName, orderByField = null) {
-  const [data, setData] = useState([]);
+  const [data,    setData]    = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    
-    // let unsubFirestore = null;
+    let unsubFirestore = null;
 
-    // ✅ Pehle Auth ready hone ka wait karo, phir data load karo
-    // const unsubAuth = onAuthStateChanged(auth, (user) => {
-    //   if (user) {
-    //     const ref = collection(db, collectionName);
-    //     const q = orderByField ? query(ref, orderBy(orderByField)) : ref;
+    const unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      // Always clean up previous Firestore listener before starting a new one
+      if (unsubFirestore) { unsubFirestore(); unsubFirestore = null; }
 
-    //     unsubFirestore = onSnapshot(q, (snap) => {
-    //       console.log(
-    //         "Collection:",
-    //         collectionName,
-    //         "Docs:",
-    //         snap.docs.length
-    //       );
-    //       setData(snap.docs.map((d) => ({ ...d.data(), _docId: d.id })));
-    //       setLoading(false);
-    //     });
-    //   } else {
-    //     setLoading(false);
-    //   }
-    // });
-
-    const ref = collection(db, collectionName);
-    const q = orderByField ? query(ref, orderBy(orderByField)) : ref;
-
-    const unsubFirestore = onSnapshot(q, (snap) => {
-      setData(
-        snap.docs.map((d) => ({
-          ...d.data(),
-          _docId: d.id,
-        }))
-      );
-
-      setLoading(false);
+      if (firebaseUser) {
+        // User is logged in — start listening to Firestore
+        const ref = collection(db, collectionName);
+        const q   = orderByField ? query(ref, orderBy(orderByField)) : ref;
+        unsubFirestore = onSnapshot(q, (snap) => {
+          setData(snap.docs.map((d) => ({ ...d.data(), _docId: d.id })));
+          setLoading(false);
+        });
+      } else {
+        // User is logged out — clear data
+        setData([]);
+        setLoading(false);
+      }
     });
 
-    return () => unsubFirestore(); },
+    return () => {
+      unsubAuth();
+      if (unsubFirestore) unsubFirestore();
+    };
+  }, [collectionName, orderByField]);
 
-     [collectionName, orderByField]);
-
-   return { data, loading };
-  }
- 
-
-    //   return () => {
-    //     unsubAuth();
-    //     if (unsubFirestore) unsubFirestore();
-    //   };
-    // }, 
-
-//     [collectionName, orderByField]);
-
-//   return { data, loading };
-// }
+  return { data, loading };
+}
 
 // ─── EMPLOYEES ──────────────────────────────────────────────────────────────
 export function useEmployees() {
@@ -97,13 +64,7 @@ export function useEmployees() {
     await deleteDoc(doc(db, "employees", String(id)));
   }, []);
 
-  const setEmployees = useCallback(async (updater) => {
-    if (typeof updater === "function") {
-      console.warn("useEmployees: use addEmployee/updateEmployee/deleteEmployee instead");
-    }
-  }, []);
-
-  return { employees, loading, addEmployee, updateEmployee, deleteEmployee, setEmployees };
+  return { employees, loading, addEmployee, updateEmployee, deleteEmployee };
 }
 
 // ─── KPIs ───────────────────────────────────────────────────────────────────
@@ -119,13 +80,7 @@ export function useKpis() {
     await updateDoc(doc(db, "kpis", String(id)), updates);
   }, []);
 
-  const setKpis = useCallback((updater) => {
-    if (typeof updater === "function") {
-      console.warn("useKpis: use addKpi/updateKpi directly.");
-    }
-  }, []);
-
-  return { kpis, loading, addKpi, updateKpi, setKpis };
+  return { kpis, loading, addKpi, updateKpi };
 }
 
 // ─── LEAVES ─────────────────────────────────────────────────────────────────
@@ -141,13 +96,7 @@ export function useLeaves() {
     await updateDoc(doc(db, "leaves", String(id)), { status });
   }, []);
 
-  const setLeaves = useCallback((updater) => {
-    if (typeof updater === "function") {
-      console.warn("useLeaves: use addLeave/updateLeaveStatus directly.");
-    }
-  }, []);
-
-  return { leaves, loading, addLeave, updateLeaveStatus, setLeaves };
+  return { leaves, loading, addLeave, updateLeaveStatus };
 }
 
 // ─── PAYROLL ────────────────────────────────────────────────────────────────
@@ -163,58 +112,37 @@ export function usePayroll() {
     await updateDoc(doc(db, "payroll", String(id)), { status });
   }, []);
 
-  const setPayroll = useCallback((updater) => {
-    if (typeof updater === "function") {
-      console.warn("usePayroll: use addPayroll/updatePayrollStatus directly.");
-    }
-  }, []);
-
-  return { payroll, loading, addPayroll, updatePayrollStatus, setPayroll };
+  return { payroll, loading, addPayroll, updatePayrollStatus };
 }
 
 // ─── LEAVE BALANCES ─────────────────────────────────────────────────────────
 export function useLeaveBalances() {
   const [leaveBalances, setLeaveBalances] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [loading,       setLoading]       = useState(true);
 
   useEffect(() => {
-    // let unsubFirestore = null;
+    let unsubFirestore = null;
 
-    // const unsubAuth = onAuthStateChanged(auth, (user) => {
-    //   if (user) {
-    //     unsubFirestore = onSnapshot(collection(db, "leaveBalances"), (snap) => {
-    //       const obj = {};
-    //       snap.docs.forEach((d) => {
-    //         obj[d.id] = d.data();
-    //       });
-    //       setLeaveBalances(obj);
-    //       setLoading(false);
-    //     });
-    //   } else {
-    //     setLoading(false);
-    //   }
-    // });
+    const unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      if (unsubFirestore) { unsubFirestore(); unsubFirestore = null; }
 
-    // return () => {
-    //   unsubAuth();
-    //   if (unsubFirestore) unsubFirestore();
-    // };
-
-    const unsubFirestore = onSnapshot(
-      collection(db, "leaveBalances"),
-      (snap) => {
-        const obj = {};
-
-        snap.docs.forEach((d) => {
-          obj[d.id] = d.data();
+      if (firebaseUser) {
+        unsubFirestore = onSnapshot(collection(db, "leaveBalances"), (snap) => {
+          const obj = {};
+          snap.docs.forEach((d) => { obj[d.id] = d.data(); });
+          setLeaveBalances(obj);
+          setLoading(false);
         });
-
-        setLeaveBalances(obj);
+      } else {
+        setLeaveBalances({});
         setLoading(false);
       }
-    );
+    });
 
-    return () => unsubFirestore();
+    return () => {
+      unsubAuth();
+      if (unsubFirestore) unsubFirestore();
+    };
   }, []);
 
   return { leaveBalances, loading };

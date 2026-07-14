@@ -1,30 +1,41 @@
+// src/pages/login-page/LoginPage.jsx
+// ✅ Now uses Firebase Auth (signInWithEmailAndPassword)
+//    No more local employees array check. No more onLogin / employees props.
+//    When login succeeds, App.jsx onAuthStateChanged fires automatically.
+
 import "./LoginPage.css";
 import { useState } from "react";
 import { T } from "../../theme/theme";
 import { Briefcase } from "lucide-react";
 import Input from "../../components/input/Input";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "../../firebase/firebaseConfig";
 
-const LoginPage = ({ onLogin, employees }) => {
-  const [email, setEmail] = useState("");
-  const [pass, setPass] = useState("");
-  const [err, setErr] = useState("");
+const LoginPage = () => {
+  const [email,   setEmail]   = useState("");
+  const [pass,    setPass]    = useState("");
+  const [err,     setErr]     = useState("");
   const [loading, setLoading] = useState(false);
 
   const demos = [
-    { label: "Admin", email: "admin@hrm.com", pass: "admin123", color: T.purple },
-    { label: "HR", email: "hr@hrm.com", pass: "hr123", color: T.secondary },
-    { label: "Emp", email: "emp@hrm.com", pass: "emp123", color: T.primary },
+    { label: "Admin", email: "admin@hrm.com", pass: "admin123", color: T.purple    },
+    { label: "HR",    email: "hr@hrm.com",    pass: "hr123",    color: T.secondary },
+    { label: "Emp",   email: "emp@hrm.com",   pass: "emp123",   color: T.primary   },
   ];
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
+    if (!email || !pass) { setErr("Please enter email and password."); return; }
     setLoading(true);
     setErr("");
-    setTimeout(() => {
-      const u = employees.find(e => e.email === email && e.pass === pass);
-      if (u) onLogin(u);
-      else setErr("Invalid credentials. Try demo accounts below.");
+    try {
+      await signInWithEmailAndPassword(auth, email, pass);
+      // ✅ App.jsx onAuthStateChanged will detect this login and set the user.
+      // No manual state update needed here.
+    } catch {
+      setErr("Invalid credentials. Try demo accounts below.");
       setLoading(false);
-    }, 600);
+    }
+    // Note: don't setLoading(false) on success — App.jsx will unmount this component
   };
 
   return (
@@ -53,10 +64,7 @@ const LoginPage = ({ onLogin, employees }) => {
 
         <div
           className="login-card"
-          style={{
-            background: T.card,
-            border: `1px solid ${T.border}`,
-          }}
+          style={{ background: T.card, border: `1px solid ${T.border}` }}
         >
           <div className="login-heading" style={{ color: T.text }}>
             Sign in to your account
@@ -107,10 +115,7 @@ const LoginPage = ({ onLogin, employees }) => {
 
         <div
           className="demo-box"
-          style={{
-            background: T.surface,
-            border: `1px solid ${T.border}`,
-          }}
+          style={{ background: T.surface, border: `1px solid ${T.border}` }}
         >
           <div className="demo-title" style={{ color: T.muted }}>
             Quick Demo Access
@@ -120,10 +125,7 @@ const LoginPage = ({ onLogin, employees }) => {
             {demos.map(d => (
               <button
                 key={d.label}
-                onClick={() => {
-                  setEmail(d.email);
-                  setPass(d.pass);
-                }}
+                onClick={() => { setEmail(d.email); setPass(d.pass); }}
                 className="demo-btn"
                 style={{
                   background: `${d.color}14`,

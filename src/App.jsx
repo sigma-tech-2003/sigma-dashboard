@@ -1,90 +1,45 @@
 // src/App.jsx
-// Security fixes:
-// ✅ Fix 1: Role is now verified from Firestore, NOT from localStorage
-// ✅ Fix 2: Role is also fetched from Firestore on login
-// ✅ Fix 3: Anonymous auth is used only for seeding, not for user sessions
+// ✅ Security v2 — Firebase Auth manages sessions, no localStorage
 
 import { useState, useEffect } from "react";
 
-// ─── Firebase ────────────────────────────────────────────────────────────────
-import {
-  useEmployees,
-  useKpis,
-  useLeaves,
-  usePayroll,
-  useLeaveBalances,
-} from "./firebase/useFirestore";
+import { useEmployees, useKpis, useLeaves, usePayroll, useLeaveBalances } from "./firebase/useFirestore";
 import { seedAll, isSeeded } from "./firebase/seedFirestore";
-import { auth, db } from "./firebase/firebaseConfig"; // ✅ db also imported
-// import { signInAnonymously } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore"; // ✅ To fetch data from Firestore
+import { auth, db } from "./firebase/firebaseConfig";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { createAuthUsersFromFirestore } from "./firebase/setupAuthUsers";
 
-// ─── UI Shell ────────────────────────────────────────────────────────────────
 import LoadingScreen from "./components/loading-screen/LoadingScreen";
-import Layout from "./components/layout/Layout";
-
-// ─── Pages ───────────────────────────────────────────────────────────────────
-import LoginPage from "./pages/login-page/LoginPage";
-import Dashboard from "./pages/dashboard/Dashboard";
+import Layout        from "./components/layout/Layout";
+import LoginPage     from "./pages/login-page/LoginPage";
+import Dashboard     from "./pages/dashboard/Dashboard";
 import EmployeesPage from "./pages/employees/EmployeesPage";
-import KPIPage from "./pages/kpi/KPIPage";
-import LeavePage from "./pages/leave/LeavePage";
-import PayrollPage from "./pages/payroll/PayrollPage";
+import KPIPage       from "./pages/kpi/KPIPage";
+import LeavePage     from "./pages/leave/LeavePage";
+import PayrollPage   from "./pages/payroll/PayrollPage";
 import MyPayslipsPage from "./pages/payroll/MyPayslipsPage";
 
-/* ═══════════════════════════════════════════════════════════════════
-   HELPER — Verify the real role from Firestore
-   This function takes an employee's ID and checks Firestore
-   for their actual role — no one can change their role by
-   editing localStorage anymore.
-═══════════════════════════════════════════════════════════════════ */
-async function verifyUserRole(savedUser) {
-  // If user or user.id is missing, return null
-  if (!savedUser?.id) return null;
 
-  try {
-    // Look up this user in the employees collection in Firestore
-    const empRef = doc(db, "employees", String(savedUser.id));
-    const empSnap = await getDoc(empRef);
-
-    if (empSnap.exists()) {
-      // ✅ Take role from Firestore — IGNORE the role in localStorage
-      return {
-        ...savedUser,
-        role: empSnap.data().role, // Real role from Firestore
-      };
-    } else {
-      // Employee does not exist — session is fake or outdated, discard it
-      return null;
-    }
-  } catch (err) {
-    console.warn("Role verification failed:", err);
-    return null;
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   ROOT APP
-═══════════════════════════════════════════════════════════════════ */
 export default function App() {
-  const [user, setUser] = useState(null); // ✅ Start as null — verify first
-  const [page, setPage] = useState("dashboard");
-  const [seeding, setSeeding] = useState(false);
-  const [verifying, setVerifying] = useState(true); // ✅ New state — verifying session
+  const [user,      setUser]      = useState(null);
+  const [authReady, setAuthReady] = useState(false); // has Firebase Auth responded?
+  const [page,      setPage]      = useState("dashboard");
+  const [seeding,   setSeeding]   = useState(false);
 
-  // ── Live Firestore collections ───────────────────────────────────
   const { employees, loading: loadEmp, addEmployee, updateEmployee, deleteEmployee } = useEmployees();
-  const { kpis, loading: loadKpi, addKpi, updateKpi } = useKpis();
-  const { leaves, loading: loadLv, addLeave, updateLeaveStatus } = useLeaves();
-  const { payroll, loading: loadPay, addPayroll, updatePayrollStatus } = usePayroll();
-  const { leaveBalances, loading: loadBal } = useLeaveBalances();
-
+  const { kpis,     loading: loadKpi, addKpi, updateKpi }                           = useKpis();
+  const { leaves,   loading: loadLv,  addLeave, updateLeaveStatus }                 = useLeaves();
+  const { payroll,  loading: loadPay, addPayroll, updatePayrollStatus }             = usePayroll();
+  const { leaveBalances, loading: loadBal }                                         = useLeaveBalances();
   const loading = loadEmp || loadKpi || loadLv || loadPay || loadBal;
 
-  // ── On app start: seed the database + verify the session ─────────
+  // ── Seed database on first run ────────────────────────────────────
+  // Requires Firestore rules to be OPEN (allow read, write: if true)
+  // After seeding + creating Auth users, lock the rules.
+  // Once rules are locked, this try/catch silently skips seeding.
   useEffect(() => {
-    async function init() {
-      // STEP 1: Seed the database if this is the first run
+    async function seed() {
       try {
         const seeded = await isSeeded();
         if (!seeded) {
@@ -92,92 +47,74 @@ export default function App() {
           await seedAll();
           setSeeding(false);
         }
-      } catch (err) {
-        console.warn("Seed check failed:", err);
-        setSeeding(false);
+      } catch {
+        setSeeding(false); // rules locked = already seeded, no action needed
       }
-
-      // STEP 2: Check for an existing session
-      // ✅ FIX: Load user from localStorage, but verify their role from Firestore
-      const saved = localStorage.getItem("hrm_user");
-      if (saved) {
-        try {
-          const savedUser = JSON.parse(saved);
-          const verifiedUser = await verifyUserRole(savedUser);
-
-          if (verifiedUser) {
-            // ✅ Valid user — set with the real role from Firestore
-            setUser(verifiedUser);
-            // ✅ Also update localStorage with the real role
-            localStorage.setItem("hrm_user", JSON.stringify(verifiedUser));
-          } else {
-            // ❌ Fake or outdated session — remove it, user must log in again
-            localStorage.removeItem("hrm_user");
-          }
-        } catch (err) {
-          // ❌ Corrupt data in localStorage — remove it
-          localStorage.removeItem("hrm_user");
-        }
-      }
-
-      setVerifying(false); // Verification complete
     }
+    seed();
+  }, []);
+  useEffect(() => { createAuthUsersFromFirestore(); }, []);
 
-    init();
+  // ── Firebase Auth session listener ────────────────────────────────
+  // This is the ONLY auth truth. No localStorage. Firebase handles sessions.
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          // Find the employee record that matches this Firebase Auth email
+          const q    = query(collection(db, "employees"), where("email", "==", firebaseUser.email));
+          const snap = await getDocs(q);
+
+          if (!snap.empty) {
+            setUser(snap.docs[0].data()); // role comes from Firestore, not from client
+          } else {
+            // Firebase user exists but no matching employee — sign them out
+            await signOut(auth);
+            setUser(null);
+          }
+        } catch {
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+      setAuthReady(true);
+    });
+    return () => unsub();
   }, []);
 
-  // ── Loading / Verifying states ────────────────────────────────────
-  if (seeding) return <LoadingScreen message="Setting up your database…" />;
-  if (verifying) return <LoadingScreen message="Verifying your session…" />; // ✅ New
-  if (loading && !user) return <LoadingScreen message="Connecting to Firebase…" />;
+  // ── Guards ────────────────────────────────────────────────────────
+  if (seeding)           return <LoadingScreen message="Setting up your database…" />;
+  if (!authReady)        return <LoadingScreen message="Connecting to Firebase…"   />;
+  if (loading && !user)  return <LoadingScreen message="Loading data…"             />;
+  if (!user)             return <LoginPage />;   // no props needed anymore
+  if (loading)           return <LoadingScreen message="Loading data…"             />;
 
-  // ── Auth gate ─────────────────────────────────────────────────────
-  if (!user) {
-    return (
-      <LoginPage
-        employees={employees}
-        onLogin={async (u) => {
-          // ✅ FIX: Verify role from Firestore on login as well
-          const verifiedUser = await verifyUserRole(u);
-          const finalUser = verifiedUser || u; // Fallback: use original if verify fails
+  // ── Logout ────────────────────────────────────────────────────────
+  const onLogout = async () => {
+    await signOut(auth);
+    setUser(null);
+    setPage("dashboard");
+  };
 
-          localStorage.setItem("hrm_user", JSON.stringify(finalUser));
-          setUser(finalUser);
-          setPage("dashboard");
-        }}
-      />
-    );
-  }
+  const isAdminOrHR = user.role === "admin" || user.role === "hr";
 
-  if (loading) return <LoadingScreen message="Loading data…" />;
-
-  // ── Shared props passed to every page ────────────────────────────
   const sharedProps = {
-    user,
-    employees, kpis, leaves, payroll, leaveBalances,
+    user, employees, kpis, leaves, payroll, leaveBalances,
     addEmployee, updateEmployee, deleteEmployee,
     addKpi, updateKpi,
     addLeave, updateLeaveStatus,
     addPayroll, updatePayrollStatus,
   };
 
-  const onLogout = () => {
-    localStorage.removeItem("hrm_user");
-    setUser(null);
-    setPage("dashboard");
-  };
-
-  // ✅ Role check is the same — but the role now comes from Firestore, not localStorage
-  const isAdminOrHR = user.role === "admin" || user.role === "hr";
-
   return (
     <Layout user={user} page={page} setPage={setPage} onLogout={onLogout}>
-      {page === "dashboard" && <Dashboard      {...sharedProps} />}
-      {page === "employees" && isAdminOrHR && <EmployeesPage  {...sharedProps} />}
-      {page === "kpi" && <KPIPage        {...sharedProps} />}
-      {page === "leave" && <LeavePage      {...sharedProps} />}
-      {page === "payroll" && isAdminOrHR && <PayrollPage    {...sharedProps} />}
-      {page === "payslips" && user.role === "employee" && <MyPayslipsPage {...sharedProps} />}
+      {page === "dashboard"                              && <Dashboard     {...sharedProps} />}
+      {page === "employees" && isAdminOrHR              && <EmployeesPage {...sharedProps} />}
+      {page === "kpi"                                   && <KPIPage       {...sharedProps} />}
+      {page === "leave"                                 && <LeavePage     {...sharedProps} />}
+      {page === "payroll"   && isAdminOrHR              && <PayrollPage   {...sharedProps} />}
+      {page === "payslips"  && user.role === "employee" && <MyPayslipsPage {...sharedProps} />}
     </Layout>
   );
 }
