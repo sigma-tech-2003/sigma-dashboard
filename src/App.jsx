@@ -8,7 +8,6 @@ import { seedAll, isSeeded } from "./firebase/seedFirestore";
 import { auth, db } from "./firebase/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { collection, query, where, getDocs } from "firebase/firestore";
-import { createAuthUsersFromFirestore } from "./firebase/setupAuthUsers";
 
 import LoadingScreen from "./components/loading-screen/LoadingScreen";
 import Layout from "./components/layout/Layout";
@@ -52,11 +51,7 @@ export default function App() {
       }
     }
     seed();
-  }, []);
-  useEffect(() => {
-    console.log("TEST - setup chal raha hai");  // ← yeh add karo
-    createAuthUsersFromFirestore();
-  }, []);
+  }, []);git add -A
 
   // ── Firebase Auth session listener ────────────────────────────────
   // This is the ONLY auth truth. No localStorage. Firebase handles sessions.
