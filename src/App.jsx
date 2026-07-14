@@ -11,27 +11,27 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { createAuthUsersFromFirestore } from "./firebase/setupAuthUsers";
 
 import LoadingScreen from "./components/loading-screen/LoadingScreen";
-import Layout        from "./components/layout/Layout";
-import LoginPage     from "./pages/login-page/LoginPage";
-import Dashboard     from "./pages/dashboard/Dashboard";
+import Layout from "./components/layout/Layout";
+import LoginPage from "./pages/login-page/LoginPage";
+import Dashboard from "./pages/dashboard/Dashboard";
 import EmployeesPage from "./pages/employees/EmployeesPage";
-import KPIPage       from "./pages/kpi/KPIPage";
-import LeavePage     from "./pages/leave/LeavePage";
-import PayrollPage   from "./pages/payroll/PayrollPage";
+import KPIPage from "./pages/kpi/KPIPage";
+import LeavePage from "./pages/leave/LeavePage";
+import PayrollPage from "./pages/payroll/PayrollPage";
 import MyPayslipsPage from "./pages/payroll/MyPayslipsPage";
 
 
 export default function App() {
-  const [user,      setUser]      = useState(null);
+  const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false); // has Firebase Auth responded?
-  const [page,      setPage]      = useState("dashboard");
-  const [seeding,   setSeeding]   = useState(false);
+  const [page, setPage] = useState("dashboard");
+  const [seeding, setSeeding] = useState(false);
 
   const { employees, loading: loadEmp, addEmployee, updateEmployee, deleteEmployee } = useEmployees();
-  const { kpis,     loading: loadKpi, addKpi, updateKpi }                           = useKpis();
-  const { leaves,   loading: loadLv,  addLeave, updateLeaveStatus }                 = useLeaves();
-  const { payroll,  loading: loadPay, addPayroll, updatePayrollStatus }             = usePayroll();
-  const { leaveBalances, loading: loadBal }                                         = useLeaveBalances();
+  const { kpis, loading: loadKpi, addKpi, updateKpi } = useKpis();
+  const { leaves, loading: loadLv, addLeave, updateLeaveStatus } = useLeaves();
+  const { payroll, loading: loadPay, addPayroll, updatePayrollStatus } = usePayroll();
+  const { leaveBalances, loading: loadBal } = useLeaveBalances();
   const loading = loadEmp || loadKpi || loadLv || loadPay || loadBal;
 
   // ── Seed database on first run ────────────────────────────────────
@@ -53,7 +53,10 @@ export default function App() {
     }
     seed();
   }, []);
-  useEffect(() => { createAuthUsersFromFirestore(); }, []);
+  useEffect(() => {
+    console.log("TEST - setup chal raha hai");  // ← yeh add karo
+    createAuthUsersFromFirestore();
+  }, []);
 
   // ── Firebase Auth session listener ────────────────────────────────
   // This is the ONLY auth truth. No localStorage. Firebase handles sessions.
@@ -62,7 +65,7 @@ export default function App() {
       if (firebaseUser) {
         try {
           // Find the employee record that matches this Firebase Auth email
-          const q    = query(collection(db, "employees"), where("email", "==", firebaseUser.email));
+          const q = query(collection(db, "employees"), where("email", "==", firebaseUser.email));
           const snap = await getDocs(q);
 
           if (!snap.empty) {
@@ -84,11 +87,11 @@ export default function App() {
   }, []);
 
   // ── Guards ────────────────────────────────────────────────────────
-  if (seeding)           return <LoadingScreen message="Setting up your database…" />;
-  if (!authReady)        return <LoadingScreen message="Connecting to Firebase…"   />;
-  if (loading && !user)  return <LoadingScreen message="Loading data…"             />;
-  if (!user)             return <LoginPage />;   // no props needed anymore
-  if (loading)           return <LoadingScreen message="Loading data…"             />;
+  if (seeding) return <LoadingScreen message="Setting up your database…" />;
+  if (!authReady) return <LoadingScreen message="Connecting to Firebase…" />;
+  if (loading && !user) return <LoadingScreen message="Loading data…" />;
+  if (!user) return <LoginPage />;   // no props needed anymore
+  if (loading) return <LoadingScreen message="Loading data…" />;
 
   // ── Logout ────────────────────────────────────────────────────────
   const onLogout = async () => {
@@ -109,12 +112,12 @@ export default function App() {
 
   return (
     <Layout user={user} page={page} setPage={setPage} onLogout={onLogout}>
-      {page === "dashboard"                              && <Dashboard     {...sharedProps} />}
-      {page === "employees" && isAdminOrHR              && <EmployeesPage {...sharedProps} />}
-      {page === "kpi"                                   && <KPIPage       {...sharedProps} />}
-      {page === "leave"                                 && <LeavePage     {...sharedProps} />}
-      {page === "payroll"   && isAdminOrHR              && <PayrollPage   {...sharedProps} />}
-      {page === "payslips"  && user.role === "employee" && <MyPayslipsPage {...sharedProps} />}
+      {page === "dashboard" && <Dashboard     {...sharedProps} />}
+      {page === "employees" && isAdminOrHR && <EmployeesPage {...sharedProps} />}
+      {page === "kpi" && <KPIPage       {...sharedProps} />}
+      {page === "leave" && <LeavePage     {...sharedProps} />}
+      {page === "payroll" && isAdminOrHR && <PayrollPage   {...sharedProps} />}
+      {page === "payslips" && user.role === "employee" && <MyPayslipsPage {...sharedProps} />}
     </Layout>
   );
 }
