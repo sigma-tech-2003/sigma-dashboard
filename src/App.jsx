@@ -51,7 +51,7 @@ export default function App() {
       }
     }
     seed();
-  }, []);git add -A
+  }, []);
 
   // ── Firebase Auth session listener ────────────────────────────────
   // This is the ONLY auth truth. No localStorage. Firebase handles sessions.
