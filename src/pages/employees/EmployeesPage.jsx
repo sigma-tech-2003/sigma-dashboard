@@ -5,6 +5,7 @@ import { Plus, Search, Edit, Trash2, Check, Eye } from "lucide-react";
 
 import { T }        from "../../theme/theme";
 import { fmt, fdate } from "../../utils/helpers";
+import { scopeEmployees, assignableRoles, canManageEmployee } from "../../utils/permissions";
 import Badge   from "../../components/badge/Badge";
 import Avatar  from "../../components/avatar/Avatar";
 import Modal   from "../../components/modal/Modal";
@@ -27,8 +28,18 @@ const EmployeesPage = ({
   // Active departments for dropdown
   const activeDepts = departments.filter(d => d.status === "Active");
 
+  // Role-scoped base list — admin/hr see everyone, manager sees their dept,
+  // tl sees their team, employee (shouldn't land here) sees only self.
+  const scoped = scopeEmployees(user, employees);
+
+  // Which roles can this user assign to a new/edited employee?
+  const myAssignableRoles = assignableRoles(user);
+
+  // Manager/TL are locked to their own department when adding people
+  const deptLocked = user.role === "manager" || user.role === "tl";
+
   // ── Filtered list (search + dept filter) ─────────────────────────
-  const filtered = employees.filter(e => {
+  const filtered = scoped.filter(e => {
     const matchSearch =
       (e.name  || "").toLowerCase().includes(search.toLowerCase()) ||
       (e.dept  || "").toLowerCase().includes(search.toLowerCase()) ||
@@ -38,16 +49,31 @@ const EmployeesPage = ({
   });
 
   // ── Handlers ─────────────────────────────────────────────────────
-  const openAdd  = ()    => { setForm({ role: "employee", status: "active", allowances: 0 }); setModal("add");  };
+  const openAdd = () => {
+    setForm({
+      role:       myAssignableRoles[0] || "employee",
+      status:     "active",
+      allowances: 0,
+      dept:       deptLocked ? user.dept : "",
+      ...(user.role === "tl" ? { teamLeadId: user.id } : {}),
+    });
+    setModal("add");
+  };
   const openEdit = (emp) => { setForm({ ...emp }); setModal("edit"); };
 
   const save = async () => {
     setSaving(true);
     try {
+      // Manager/TL can never assign outside their own dept/team, regardless
+      // of what the form state holds.
+      const locked = deptLocked ? { dept: user.dept } : {};
+      if (user.role === "tl") locked.teamLeadId = user.id;
+
       if (modal === "add") {
         const id     = Date.now();
         const newEmp = {
           ...form,
+          ...locked,
           id,
           empId:      `EMP-${String(employees.length + 1).padStart(3, "0")}`,
           basic:      +form.basic      || 0,
@@ -55,7 +81,7 @@ const EmployeesPage = ({
         };
         await addEmployee(newEmp);
       } else {
-        await updateEmployee(form.id, { ...form, basic: +form.basic, allowances: +form.allowances });
+        await updateEmployee(form.id, { ...form, ...locked, basic: +form.basic, allowances: +form.allowances });
       }
       setModal(null);
     } finally {
@@ -76,10 +102,10 @@ const EmployeesPage = ({
         <div>
           <div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>Employees</div>
           <div style={{ fontSize: 12, color: T.muted }}>
-            {employees.filter(e => e.status === "active").length} active · {employees.length} total
+            {scoped.filter(e => e.status === "active").length} active · {scoped.length} total
           </div>
         </div>
-        {user.role === "admin" && <Btn onClick={openAdd}><Plus size={14} />Add Employee</Btn>}
+        {myAssignableRoles.length > 0 && <Btn onClick={openAdd}><Plus size={14} />Add Employee</Btn>}
       </div>
 
       {/* ── Search + Department filter ──────────────────────────── */}
@@ -163,11 +189,11 @@ const EmployeesPage = ({
                   <td style={{ padding: "12px 16px" }}>
                     <div style={{ display: "flex", gap: 6 }}>
                       <button onClick={() => setViewEmp(emp)} style={{ background: T.primaryGlow, border: "none", color: T.primary, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><Eye    size={13} /></button>
-                      {user.role === "admin" && (
-                        <>
-                          <button onClick={() => openEdit(emp)} style={{ background: "#f0a50015", border: "none", color: T.warning, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><Edit   size={13} /></button>
-                          <button onClick={() => del(emp.id)}   style={{ background: T.dangerGlow, border: "none", color: T.danger,  padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><Trash2 size={13} /></button>
-                        </>
+                      {(user.role === "admin" || user.role === "hr" || canManageEmployee(user, emp)) && (
+                        <button onClick={() => openEdit(emp)} style={{ background: "#f0a50015", border: "none", color: T.warning, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><Edit   size={13} /></button>
+                      )}
+                      {(user.role === "admin" || user.role === "hr") && (
+                        <button onClick={() => del(emp.id)}   style={{ background: T.dangerGlow, border: "none", color: T.danger,  padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><Trash2 size={13} /></button>
                       )}
                     </div>
                   </td>
@@ -191,9 +217,10 @@ const EmployeesPage = ({
               label="Department"
               value={form.dept || ""}
               onChange={e => setForm(p => ({ ...p, dept: e.target.value }))}
+              disabled={deptLocked}
             >
               <option value="">— Select Department —</option>
-              {activeDepts.map(d => (
+              {(deptLocked ? activeDepts.filter(d => d.name === user.dept) : activeDepts).map(d => (
                 <option key={d.id} value={d.name}>{d.name}</option>
               ))}
             </Select>
@@ -202,10 +229,12 @@ const EmployeesPage = ({
             <Input label="Basic Salary" value={form.basic      || ""} onChange={e => setForm(p => ({ ...p, basic:      e.target.value }))} type="number" />
             <Input label="Allowances"   value={form.allowances || ""} onChange={e => setForm(p => ({ ...p, allowances: e.target.value }))} type="number" />
             <Input label="Join Date"    value={form.joinDate   || ""} onChange={e => setForm(p => ({ ...p, joinDate:   e.target.value }))} type="date" />
-            <Select label="Role"   value={form.role   || "employee"} onChange={e => setForm(p => ({ ...p, role:   e.target.value }))}>
-              <option value="admin">Admin</option>
-              <option value="hr">HR</option>
-              <option value="employee">Employee</option>
+            {/* Role choices depend on who's creating/editing — a manager can
+                only make Team Leads, a TL can only add Employees, etc. */}
+            <Select label="Role" value={form.role || myAssignableRoles[0] || "employee"} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
+              {myAssignableRoles.map(r => (
+                <option key={r} value={r}>{r === "hr" ? "HR" : r === "tl" ? "Team Lead" : r.charAt(0).toUpperCase() + r.slice(1)}</option>
+              ))}
             </Select>
             <Select label="Status" value={form.status || "active"}   onChange={e => setForm(p => ({ ...p, status: e.target.value }))}>
               <option value="active">Active</option>

@@ -4,6 +4,7 @@ import { Plus, Check } from "lucide-react";
 
 import { T } from "../../theme/theme";
 import { pct, kpiScore, perfLabel, perfColor } from "../../utils/helpers";
+import { scopeEmployees, scopeByEmployee } from "../../utils/permissions";
 import Avatar      from "../../components/avatar/Avatar";
 import Modal       from "../../components/modal/Modal";
 import Input       from "../../components/input/Input";
@@ -17,10 +18,13 @@ const KPIPage = ({ kpis, addKpi, updateKpi, employees, user }) => {
   const [selEmp, setSelEmp] = useState("all");
 
   const isAdmin = user.role !== "employee";
-  const myKpis  = isAdmin ? kpis : kpis.filter(k => k.empId === user.id);
+  // Admin/HR see every KPI; manager sees their department; tl sees their
+  // team; employee sees only their own.
+  const scopedEmployees = scopeEmployees(user, employees);
+  const myKpis  = isAdmin ? scopeByEmployee(user, kpis, employees) : kpis.filter(k => k.empId === user.id);
   const visible  = selEmp === "all" ? myKpis : myKpis.filter(k => k.empId === parseInt(selEmp));
 
-  const empKpiSummary = employees.filter(e => e.role === "employee").map(e => {
+  const empKpiSummary = scopedEmployees.filter(e => e.role === "employee").map(e => {
     const eks = kpis.filter(k => k.empId === e.id);
     return { emp: e, kpis: eks, score: kpiScore(eks), label: perfLabel(kpiScore(eks)) };
   }).filter(s => s.kpis.length > 0);
@@ -85,7 +89,7 @@ const KPIPage = ({ kpis, addKpi, updateKpi, employees, user }) => {
             onChange={e => setSelEmp(e.target.value)}
             style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 12px", color: T.text, fontSize: 13, outline: "none" }}>
             <option value="all">All Employees</option>
-            {employees.filter(e => e.role === "employee").map(e => (
+            {scopedEmployees.filter(e => e.role === "employee").map(e => (
               <option key={e.id} value={e.id}>{e.name}</option>
             ))}
           </select>
@@ -136,7 +140,7 @@ const KPIPage = ({ kpis, addKpi, updateKpi, employees, user }) => {
         <Modal title="Assign New KPI" onClose={() => setModal(false)}>
           <Select label="Employee" value={form.empId || ""} onChange={e => setForm(p => ({ ...p, empId: e.target.value }))}>
             <option value="">Select employee</option>
-            {employees.filter(e => e.role === "employee").map(e => (
+            {scopedEmployees.filter(e => e.role === "employee").map(e => (
               <option key={e.id} value={e.id}>{e.name} — {e.dept}</option>
             ))}
           </Select>

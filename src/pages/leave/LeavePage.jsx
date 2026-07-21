@@ -4,6 +4,7 @@ import { Plus, Check, X } from "lucide-react";
 
 import { T } from "../../theme/theme";
 import { fdate } from "../../utils/helpers";
+import { scopeByEmployee } from "../../utils/permissions";
 import Badge       from "../../components/badge/Badge";
 import Avatar      from "../../components/avatar/Avatar";
 import Modal       from "../../components/modal/Modal";
@@ -17,7 +18,9 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
   const [form,  setForm]  = useState({ type: "Annual" });
 
   const isAdmin = user.role !== "employee";
-  const visible  = isAdmin ? leaves : leaves.filter(l => l.empId === user.id);
+  // Admin/HR see all requests; manager sees their dept; tl sees their team;
+  // employee sees only their own.
+  const visible  = isAdmin ? scopeByEmployee(user, leaves, employees) : leaves.filter(l => l.empId === user.id);
   const myBal    = leaveBalances[user.id] || {};
 
   const applyLeave = async () => {
