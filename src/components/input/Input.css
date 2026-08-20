@@ -1,0 +1,20 @@
+.input-wrapper {
+  margin-bottom: var(--space-6);
+}
+
+.input-label {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-muted);
+  margin-bottom: var(--space-2);
+  font-weight: var(--font-weight-semibold);
+}
+
+.input-field {
+  width: 100%;
+  border-radius: var(--radius-md);
+  padding: 9px var(--space-5);
+  font-size: var(--font-size-md);
+  outline: none;
+  box-sizing: border-box;
+}

@@ -1,0 +1,10 @@
+.data-table-container {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-card);
+}
+
+.data-table-scroll {
+  overflow-x: auto;
+}

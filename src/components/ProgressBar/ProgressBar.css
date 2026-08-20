@@ -1,0 +1,10 @@
+.progress {
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.progress-inner {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width var(--transition-progress);
+}

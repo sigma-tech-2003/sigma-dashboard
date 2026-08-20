@@ -1,0 +1,241 @@
+.layout {
+  display: flex;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sidebar {
+  display: flex;
+  width: 220px;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width var(--transition-base), transform var(--transition-base);
+}
+
+.sidebar--collapsed {
+  width: 60px;
+}
+
+.sidebar-header {
+  padding: var(--space-8) var(--space-7);
+}
+
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.logo-box {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+}
+
+.sidebar-brand {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-extrabold);
+  white-space: nowrap;
+}
+
+.nav {
+  flex: 1;
+  padding: var(--space-5) var(--space-4);
+  overflow-y: auto;
+}
+
+.nav-btn {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: 2px;
+  border: none;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  font-size: var(--font-size-md);
+  text-align: left;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.nav-btn__indicator {
+  margin-left: auto;
+}
+
+.sidebar-footer {
+  padding: var(--space-5) var(--space-4);
+}
+
+.user-box {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-1);
+}
+
+.user-box__details {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.user-box__name {
+  overflow: hidden;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  height: 56px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-5);
+  padding: 0 var(--space-8);
+}
+
+.topbar-menu-button,
+.topbar-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.topbar-menu-button {
+  width: 24px;
+  height: 24px;
+}
+
+.topbar-icon-button {
+  width: 28px;
+  height: 28px;
+}
+
+.topbar-page {
+  min-width: 0;
+  flex: 1;
+}
+
+.page-title {
+  overflow: hidden;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumbs {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: 1px;
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+}
+
+.breadcrumbs__item {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+.breadcrumbs__separator {
+  color: var(--color-muted-light);
+}
+
+.topbar-profile {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
+.page-container {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--space-9);
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: var(--radius-sm);
+}
+
+@media (max-width: 767px) {
+  .sidebar {
+    position: fixed;
+    z-index: calc(var(--z-index-modal) + 1);
+    width: 220px;
+    height: 100vh;
+    transform: translateX(-100%);
+  }
+
+  .sidebar--collapsed {
+    width: 220px;
+  }
+
+  .sidebar--mobile-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-backdrop {
+    position: fixed;
+    z-index: var(--z-index-modal);
+    inset: 0;
+    background: var(--color-overlay);
+  }
+
+  .topbar {
+    padding: 0 var(--space-5);
+  }
+
+  .topbar-profile span {
+    display: none;
+  }
+
+  .topbar-profile {
+    padding: var(--space-1);
+  }
+
+  .content {
+    padding: var(--space-7);
+  }
+}
