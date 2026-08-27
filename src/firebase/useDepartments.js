@@ -1,57 +1,69 @@
-// src/firebase/useDepartments.js
-// Same auth-aware pattern as useFirestore.js
-
-import { useState, useEffect, useCallback } from "react";
-import { db, auth } from "./firebaseConfig";
-import { onAuthStateChanged } from "firebase/auth";
+import { useCallback, useMemo } from "react";
 import {
-  collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc,
-} from "firebase/firestore";
+  useCollectionResource,
+  withCollectionSubscription,
+} from "../hooks/useCollectionResource";
+import { createCollectionSource } from "../services/firestoreService";
 
-export function useDepartments() {
-  const [departments, setDepartments] = useState([]);
-  const [loading,     setLoading]     = useState(true);
+const DEPARTMENTS_COLLECTION = "departments";
 
-  useEffect(() => {
-    let unsubFirestore = null;
+export function getDepartmentReadPlan(principal) {
+  const employee = principal?.employee;
+  const employeeId = typeof employee?.id === "string" ? employee.id.trim() : "";
+  const role = typeof employee?.role === "string" ? employee.role : "";
 
-    const unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
-      if (unsubFirestore) { unsubFirestore(); unsubFirestore = null; }
-
-      if (firebaseUser) {
-        unsubFirestore = onSnapshot(collection(db, "departments"), (snap) => {
-          setDepartments(snap.docs.map((d) => ({ ...d.data(), _docId: d.id })));
-          setLoading(false);
-        });
-      } else {
-        setDepartments([]);
-        setLoading(false);
-      }
-    });
-
-    return () => {
-      unsubAuth();
-      if (unsubFirestore) unsubFirestore();
+  if (
+    principal?.linkage === "uid"
+    && employeeId
+    && (role === "admin" || role === "hr")
+  ) {
+    return {
+      enabled: true,
+      queryScope: `departments:${role}:all`,
+      sources: [createCollectionSource()],
     };
-  }, []);
+  }
 
-  const addDepartment = useCallback(async (dept) => {
-    const id = Date.now();
-    await setDoc(doc(db, "departments", String(id)), {
-      ...dept,
-      id,
+  return {
+    enabled: false,
+    queryScope: `departments:${role || "invalid"}:disabled`,
+    sources: [],
+  };
+}
+
+export function useDepartments(collectionAccess) {
+  const principal = collectionAccess?.principal;
+  const employeeId = principal?.employee?.id;
+  const employeeRole = principal?.employee?.role;
+  const linkage = principal?.linkage;
+  const readPlan = useMemo(
+    () => getDepartmentReadPlan({
+      linkage,
+      employee: { id: employeeId, role: employeeRole },
+    }),
+    [employeeId, employeeRole, linkage],
+  );
+  const departmentAccess = useMemo(
+    () => withCollectionSubscription(collectionAccess, readPlan),
+    [collectionAccess, readPlan],
+  );
+  const resource = useCollectionResource(DEPARTMENTS_COLLECTION, departmentAccess);
+  const { create } = resource;
+
+  const addDepartment = useCallback((department) =>
+    create({
+      ...department,
       createdAt: new Date().toISOString(),
-    });
-    return id;
-  }, []);
+    }),
+  [create]);
 
-  const updateDepartment = useCallback(async (id, updates) => {
-    await updateDoc(doc(db, "departments", String(id)), updates);
-  }, []);
-
-  const deleteDepartment = useCallback(async (id) => {
-    await deleteDoc(doc(db, "departments", String(id)));
-  }, []);
-
-  return { departments, loading, addDepartment, updateDepartment, deleteDepartment };
+  return {
+    departments: resource.data,
+    loading: resource.loading,
+    error: resource.error || resource.mutationError,
+    isMutating: resource.isMutating,
+    addDepartment,
+    updateDepartment: resource.update,
+    deleteDepartment: resource.remove,
+  };
 }

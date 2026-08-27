@@ -1,0 +1,839 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function authLinkPath() {
+      return /databases/$(database)/documents/authLinks/$(request.auth.uid);
+    }
+
+    function employeePath(employeeId) {
+      return /databases/$(database)/documents/employees/$(employeeId);
+    }
+
+    function isNonEmptyString(value, maximumLength) {
+      return value is string
+        && value.size() > 0
+        && value.size() <= maximumLength;
+    }
+
+    function isSafeDocumentId(value) {
+      return isNonEmptyString(value, 1500)
+        && value != '.'
+        && value != '..'
+        && value.matches('^[^/]+$');
+    }
+
+    function isIsoTimestampString(value) {
+      return value is string
+        && value.size() == 24
+        && value.matches(
+          '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$'
+        );
+    }
+
+    function isSafeNumericId(value) {
+      return value is string
+        && value.matches('^(0|[1-9][0-9]*)$')
+        && value.size() <= 16
+        && int(value) <= 9007199254740991;
+    }
+
+    function valueMatchesDocumentId(value, documentId) {
+      return (
+          value is string
+          && value == documentId
+        )
+        || (
+          value is int
+          && isSafeNumericId(documentId)
+          && value == int(documentId)
+        );
+    }
+
+    function hasValidAuthLink() {
+      return isAuthenticated()
+        && request.auth.uid is string
+        && request.auth.uid.size() > 0
+        && exists(authLinkPath())
+        && get(authLinkPath()).data.keys().hasAll([
+          'employeeId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && get(authLinkPath()).data.keys().hasOnly([
+          'employeeId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isSafeDocumentId(get(authLinkPath()).data.employeeId)
+        && isIsoTimestampString(get(authLinkPath()).data.createdAt)
+        && isIsoTimestampString(get(authLinkPath()).data.updatedAt);
+    }
+
+    function currentEmployeeId() {
+      return get(authLinkPath()).data.employeeId;
+    }
+
+    function currentEmployeeData() {
+      return get(employeePath(currentEmployeeId())).data;
+    }
+
+    function hasActiveEmployeeIdentity() {
+      return hasValidAuthLink()
+        && exists(employeePath(currentEmployeeId()))
+        && currentEmployeeData().keys().hasAll([
+          'uid',
+          'status',
+          'role',
+          'dept'
+        ])
+        && currentEmployeeData().uid is string
+        && currentEmployeeData().uid == request.auth.uid
+        && currentEmployeeData().status is string
+        && currentEmployeeData().status == 'active'
+        && currentEmployeeData().role is string
+        && isSupportedRole(currentEmployeeData().role)
+        && isNonEmptyString(currentEmployeeData().dept, 120);
+    }
+
+    function hasRole(role) {
+      return hasActiveEmployeeIdentity() && currentEmployeeData().role == role;
+    }
+
+    function isAdmin() {
+      return hasRole('admin');
+    }
+
+    function isHr() {
+      return hasRole('hr');
+    }
+
+    function isManager() {
+      return hasRole('manager');
+    }
+
+    function isTeamLead() {
+      return hasRole('tl');
+    }
+
+    function isEmployee() {
+      return hasRole('employee');
+    }
+
+    function isSupportedRole(role) {
+      return role in ['admin', 'hr', 'manager', 'tl', 'employee'];
+    }
+
+    function hasCanonicalProjectKpiIdentity() {
+      return hasActiveEmployeeIdentity()
+        && get(authLinkPath()).data.keys().hasAll([
+          'employeeId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && get(authLinkPath()).data.createdAt is string
+        && get(authLinkPath()).data.createdAt.size() > 0
+        && get(authLinkPath()).data.updatedAt is string
+        && get(authLinkPath()).data.updatedAt.size() > 0
+        && currentEmployeeData().keys().hasAll(['uid', 'status', 'role'])
+        && currentEmployeeData().uid is string
+        && currentEmployeeData().status is string
+        && currentEmployeeData().role is string
+        && isSupportedRole(currentEmployeeData().role);
+    }
+
+    function hasSafeNumericLegacyEmployeeId() {
+      return isSafeNumericId(currentEmployeeId());
+    }
+
+    function matchesCurrentEmployeeId(value) {
+      return hasCanonicalProjectKpiIdentity()
+        && (
+          (
+            value is string
+            && value == currentEmployeeId()
+          )
+          || (
+            value is int
+            && hasSafeNumericLegacyEmployeeId()
+            && value == int(currentEmployeeId())
+          )
+        );
+    }
+
+    function projectIsAssignedToCurrentEmployee(project) {
+      return project.keys().hasAll(['assignedEmployeeIds'])
+        && project.assignedEmployeeIds is list
+        && (
+          currentEmployeeId() in project.assignedEmployeeIds
+          || (
+            hasSafeNumericLegacyEmployeeId()
+            && int(currentEmployeeId()) in project.assignedEmployeeIds
+          )
+        );
+    }
+
+    function canReadProject(project) {
+      return hasCanonicalProjectKpiIdentity()
+        && (
+          isAdmin()
+          || isHr()
+          || (isEmployee() && projectIsAssignedToCurrentEmployee(project))
+        );
+    }
+
+    function canReadKpi(kpi) {
+      return hasCanonicalProjectKpiIdentity()
+        && (
+          isAdmin()
+          || isHr()
+          || (
+            isEmployee()
+            && kpi.keys().hasAll(['empId'])
+            && matchesCurrentEmployeeId(kpi.empId)
+          )
+        );
+    }
+
+    function hasEmployeeDepartment(employee) {
+      return employee.keys().hasAll(['dept'])
+        && isNonEmptyString(employee.dept, 120);
+    }
+
+    function isAssignedToCurrentTeamLead(employee) {
+      return employee.keys().hasAll(['teamLeadId'])
+        && matchesCurrentEmployeeId(employee.teamLeadId);
+    }
+
+    function canReadEmployee(employeeId, employee) {
+      return hasActiveEmployeeIdentity()
+        && (
+          isAdmin()
+          || isHr()
+          || (
+            isManager()
+            && hasEmployeeDepartment(employee)
+            && employee.dept == currentEmployeeData().dept
+          )
+          || (
+            isTeamLead()
+            && (
+              employeeId == currentEmployeeId()
+              || isAssignedToCurrentTeamLead(employee)
+            )
+          )
+          || (isEmployee() && employeeId == currentEmployeeId())
+        );
+    }
+
+    function isValidCalendarDate(value) {
+      return value is string
+        && value.matches(
+          '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'
+        )
+        && timestamp.date(
+          int(value[0:4]),
+          int(value[5:7]),
+          int(value[8:10])
+        ).year() == int(value[0:4])
+        && timestamp.date(
+          int(value[0:4]),
+          int(value[5:7]),
+          int(value[8:10])
+        ).month() == int(value[5:7])
+        && timestamp.date(
+          int(value[0:4]),
+          int(value[5:7]),
+          int(value[8:10])
+        ).day() == int(value[8:10]);
+    }
+
+    function calendarDate(value) {
+      return timestamp.date(
+        int(value[0:4]),
+        int(value[5:7]),
+        int(value[8:10])
+      );
+    }
+
+    function isValidIsoDateTime(value) {
+      return isIsoTimestampString(value)
+        && isValidCalendarDate(value[0:10])
+        && int(value[11:13]) >= 0
+        && int(value[11:13]) <= 23
+        && int(value[14:16]) >= 0
+        && int(value[14:16]) <= 59
+        && int(value[17:19]) >= 0
+        && int(value[17:19]) <= 59;
+    }
+
+    function hasCanonicalEmployeeReference(record) {
+      return record.keys().hasAll(['empId'])
+        && isSafeDocumentId(record.empId)
+        && exists(employeePath(record.empId));
+    }
+
+    function referencedEmployeeData(record) {
+      return get(employeePath(record.empId)).data;
+    }
+
+    function referencedEmployeeHasDepartment(record) {
+      return referencedEmployeeData(record).keys().hasAll(['dept'])
+        && isNonEmptyString(referencedEmployeeData(record).dept, 120);
+    }
+
+    function referencedEmployeeIsActive(record) {
+      return referencedEmployeeData(record).keys().hasAll(['status'])
+        && referencedEmployeeData(record).status is string
+        && referencedEmployeeData(record).status == 'active';
+    }
+
+    function referencedEmployeeIsOnCurrentTeam(record) {
+      return referencedEmployeeData(record).keys().hasAll(['teamLeadId'])
+        && isSafeDocumentId(referencedEmployeeData(record).teamLeadId)
+        && referencedEmployeeData(record).teamLeadId == currentEmployeeId();
+    }
+
+    function canReadCanonicalEmployeeRecord(record) {
+      return hasActiveEmployeeIdentity()
+        && hasCanonicalEmployeeReference(record)
+        && (
+          isAdmin()
+          || isHr()
+          || (
+            isManager()
+            && referencedEmployeeHasDepartment(record)
+            && referencedEmployeeData(record).dept == currentEmployeeData().dept
+          )
+          || (
+            isTeamLead()
+            && (
+              record.empId == currentEmployeeId()
+              || referencedEmployeeIsOnCurrentTeam(record)
+            )
+          )
+          || (isEmployee() && record.empId == currentEmployeeId())
+        );
+    }
+
+    function canManageCanonicalEmployeeRecord(record) {
+      return hasActiveEmployeeIdentity()
+        && hasCanonicalEmployeeReference(record)
+        && (
+          isAdmin()
+          || isHr()
+          || (
+            isManager()
+            && referencedEmployeeHasDepartment(record)
+            && referencedEmployeeData(record).dept == currentEmployeeData().dept
+          )
+        );
+    }
+
+    function canApproveCanonicalEmployeeLeave(record) {
+      return hasActiveEmployeeIdentity()
+        && hasCanonicalEmployeeReference(record)
+        && (
+          isAdmin()
+          || isHr()
+          || (
+            isManager()
+            && referencedEmployeeHasDepartment(record)
+            && referencedEmployeeData(record).dept == currentEmployeeData().dept
+          )
+          || (
+            isTeamLead()
+            && record.empId != currentEmployeeId()
+            && referencedEmployeeIsOnCurrentTeam(record)
+          )
+        );
+    }
+
+    function recordIdMatchesPath(documentId, record) {
+      return valueMatchesDocumentId(record.id, documentId);
+    }
+
+    function leaveHasValidFields(leaveId, leave) {
+      return leave.keys().hasAll([
+          'id',
+          'empId',
+          'type',
+          'start',
+          'end',
+          'days',
+          'reason',
+          'status',
+          'applied'
+        ])
+        && leave.keys().hasOnly([
+          'id',
+          'empId',
+          'type',
+          'start',
+          'end',
+          'days',
+          'reason',
+          'status',
+          'applied'
+        ])
+        && recordIdMatchesPath(leaveId, leave)
+        && hasCanonicalEmployeeReference(leave)
+        && leave.type is string
+        && leave.type in [
+          'Annual',
+          'Sick',
+          'Casual',
+          'Maternity',
+          'Emergency'
+        ]
+        && isValidCalendarDate(leave.start)
+        && isValidCalendarDate(leave.end)
+        && calendarDate(leave.start) <= calendarDate(leave.end)
+        && leave.days is int
+        && leave.days > 0
+        && leave.days == (
+          (
+            calendarDate(leave.end).toMillis()
+            - calendarDate(leave.start).toMillis()
+          ) / 86400000
+        ) + 1
+        && leave.reason is string
+        && leave.reason.size() <= 2000
+        && leave.reason.trim().size() > 0
+        && leave.status is string
+        && leave.status in ['pending', 'approved', 'rejected']
+        && isValidCalendarDate(leave.applied);
+    }
+
+    function canCreateLeave(leaveId) {
+      return isEmployee()
+        && leaveHasValidFields(leaveId, request.resource.data)
+        && request.resource.data.empId == currentEmployeeId()
+        && request.resource.data.status == 'pending'
+        && calendarDate(request.resource.data.applied) == request.time.date();
+    }
+
+    function canUpdateLeave(leaveId) {
+      return leaveHasValidFields(leaveId, resource.data)
+        && leaveHasValidFields(leaveId, request.resource.data)
+        && canApproveCanonicalEmployeeLeave(resource.data)
+        && canApproveCanonicalEmployeeLeave(request.resource.data)
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['approved', 'rejected']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status'
+        ]);
+    }
+
+    function isValidAttendanceTime(value) {
+      return value is string
+        && (
+          value == ''
+          || value.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+        );
+    }
+
+    function attendanceHasValidFields(attendanceId, attendanceRecord) {
+      return attendanceRecord.keys().hasAll([
+          'id',
+          'empId',
+          'date',
+          'status',
+          'checkIn',
+          'checkOut',
+          'notes',
+          'createdAt',
+          'updatedAt'
+        ])
+        && attendanceRecord.keys().hasOnly([
+          'id',
+          'empId',
+          'date',
+          'status',
+          'checkIn',
+          'checkOut',
+          'notes',
+          'createdAt',
+          'updatedAt'
+        ])
+        && recordIdMatchesPath(attendanceId, attendanceRecord)
+        && hasCanonicalEmployeeReference(attendanceRecord)
+        && isValidCalendarDate(attendanceRecord.date)
+        && calendarDate(attendanceRecord.date) <= request.time.date()
+        && attendanceRecord.status is string
+        && attendanceRecord.status in ['present', 'absent', 'late', 'leave']
+        && isValidAttendanceTime(attendanceRecord.checkIn)
+        && isValidAttendanceTime(attendanceRecord.checkOut)
+        && (
+          attendanceRecord.checkIn == ''
+          || attendanceRecord.checkOut == ''
+          || attendanceRecord.checkOut > attendanceRecord.checkIn
+        )
+        && (
+          !(attendanceRecord.status in ['absent', 'leave'])
+          || (
+            attendanceRecord.checkIn == ''
+            && attendanceRecord.checkOut == ''
+          )
+        )
+        && attendanceRecord.notes is string
+        && attendanceRecord.notes.size() <= 2000
+        && isValidIsoDateTime(attendanceRecord.createdAt)
+        && isValidIsoDateTime(attendanceRecord.updatedAt)
+        && attendanceRecord.createdAt <= attendanceRecord.updatedAt;
+    }
+
+    function attendanceTimestampIsForCurrentRequest(value) {
+      return calendarDate(value[0:10]) == request.time.date();
+    }
+
+    function canCreateAttendance(attendanceId) {
+      return canManageCanonicalEmployeeRecord(request.resource.data)
+        && referencedEmployeeIsActive(request.resource.data)
+        && attendanceHasValidFields(attendanceId, request.resource.data)
+        && request.resource.data.createdAt == request.resource.data.updatedAt
+        && attendanceTimestampIsForCurrentRequest(
+          request.resource.data.createdAt
+        );
+    }
+
+    function canUpdateAttendance(attendanceId) {
+      return canManageCanonicalEmployeeRecord(resource.data)
+        && canManageCanonicalEmployeeRecord(request.resource.data)
+        && referencedEmployeeIsActive(request.resource.data)
+        && attendanceHasValidFields(attendanceId, resource.data)
+        && attendanceHasValidFields(attendanceId, request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'empId',
+          'date',
+          'status',
+          'checkIn',
+          'checkOut',
+          'notes',
+          'updatedAt'
+        ])
+        && request.resource.data.updatedAt > resource.data.updatedAt
+        && attendanceTimestampIsForCurrentRequest(
+          request.resource.data.updatedAt
+        );
+    }
+
+    function canDeleteAttendance(attendanceId) {
+      return attendanceHasValidFields(attendanceId, resource.data)
+        && canManageCanonicalEmployeeRecord(resource.data);
+    }
+
+    function isValidPayrollAmount(value) {
+      return value is number
+        && !math.isNaN(value)
+        && !math.isInfinite(value)
+        && value >= 0;
+    }
+
+    function payrollGross(payroll) {
+      return payroll.basic + payroll.allowances + payroll.bonus;
+    }
+
+    function calculatedPayrollTax(gross) {
+      return math.round(
+        gross <= 50000
+          ? 0
+          : gross <= 100000
+            ? (gross - 50000) * 0.05
+            : gross <= 200000
+              ? 2500 + (gross - 100000) * 0.1
+              : 12500 + (gross - 200000) * 0.15
+      );
+    }
+
+    function payrollHasValidFields(payrollId, payroll) {
+      return payroll.keys().hasAll([
+          'id',
+          'empId',
+          'month',
+          'year',
+          'basic',
+          'allowances',
+          'bonus',
+          'deductions',
+          'tax',
+          'net',
+          'status'
+        ])
+        && payroll.keys().hasOnly([
+          'id',
+          'empId',
+          'month',
+          'year',
+          'basic',
+          'allowances',
+          'bonus',
+          'deductions',
+          'tax',
+          'net',
+          'status'
+        ])
+        && recordIdMatchesPath(payrollId, payroll)
+        && hasCanonicalEmployeeReference(payroll)
+        && payroll.month is string
+        && payroll.month in [
+          'January',
+          'February',
+          'March',
+          'April',
+          'May',
+          'June',
+          'July',
+          'August',
+          'September',
+          'October',
+          'November',
+          'December'
+        ]
+        && payroll.year is int
+        && payroll.year >= 1
+        && payroll.year <= 9999
+        && isValidPayrollAmount(payroll.basic)
+        && isValidPayrollAmount(payroll.allowances)
+        && isValidPayrollAmount(payroll.bonus)
+        && isValidPayrollAmount(payroll.deductions)
+        && isValidPayrollAmount(payroll.tax)
+        && isValidPayrollAmount(payroll.net)
+        && payroll.tax == calculatedPayrollTax(payrollGross(payroll))
+        && payroll.net == payrollGross(payroll) - payroll.deductions - payroll.tax
+        && payroll.status is string
+        && payroll.status in ['draft', 'processed'];
+    }
+
+    function canReadPayroll(payrollId, payroll) {
+      return hasActiveEmployeeIdentity()
+        && payrollHasValidFields(payrollId, payroll)
+        && (
+          isAdmin()
+          || isHr()
+          || (
+            isEmployee()
+            && payroll.empId == currentEmployeeId()
+            && payroll.status == 'processed'
+          )
+        );
+    }
+
+    function canCreatePayroll(payrollId) {
+      return (isAdmin() || isHr())
+        && payrollHasValidFields(payrollId, request.resource.data)
+        && request.resource.data.status == 'processed';
+    }
+
+    function canUpdatePayroll(payrollId) {
+      return (isAdmin() || isHr())
+        && payrollHasValidFields(payrollId, resource.data)
+        && payrollHasValidFields(payrollId, request.resource.data)
+        && resource.data.status == 'draft'
+        && request.resource.data.status == 'processed'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status'
+        ]);
+    }
+
+    function canDeletePayroll(payrollId) {
+      return (isAdmin() || isHr())
+        && payrollHasValidFields(payrollId, resource.data);
+    }
+
+    function isValidLeaveBalanceAmount(value) {
+      return value is int && value >= 0;
+    }
+
+    function leaveBalanceBucketHasValidFields(bucket) {
+      return bucket is map
+        && bucket.keys().hasAll(['t', 'u', 'r'])
+        && bucket.keys().hasOnly(['t', 'u', 'r'])
+        && isValidLeaveBalanceAmount(bucket.t)
+        && isValidLeaveBalanceAmount(bucket.u)
+        && isValidLeaveBalanceAmount(bucket.r)
+        && bucket.u <= bucket.t
+        && bucket.r == bucket.t - bucket.u;
+    }
+
+    function leaveBalanceHasValidFields(employeeId, balance) {
+      return isSafeDocumentId(employeeId)
+        && balance.keys().hasAll(['Annual', 'Sick', 'Casual'])
+        && balance.keys().hasOnly(['Annual', 'Sick', 'Casual', 'empId'])
+        && leaveBalanceBucketHasValidFields(balance.Annual)
+        && leaveBalanceBucketHasValidFields(balance.Sick)
+        && leaveBalanceBucketHasValidFields(balance.Casual)
+        && (
+          !balance.keys().hasAny(['empId'])
+          || (
+            isSafeDocumentId(balance.empId)
+            && balance.empId == employeeId
+          )
+        );
+    }
+
+    function canReadLeaveBalance(employeeId, balance) {
+      return isEmployee()
+        && employeeId == currentEmployeeId()
+        && leaveBalanceHasValidFields(employeeId, balance);
+    }
+
+    function departmentHasValidName(department) {
+      return department.name is string
+        && department.name.size() > 0
+        && department.name.size() <= 120
+        && department.name.matches('.*\\S.*');
+    }
+
+    function departmentHasValidDescription(department) {
+      return !department.keys().hasAny(['description'])
+        || (
+          department.description is string
+          && department.description.size() <= 2000
+        );
+    }
+
+    function departmentHasValidManagerId(department) {
+      return !department.keys().hasAny(['managerId'])
+        || department.managerId == ''
+        || isSafeDocumentId(department.managerId);
+    }
+
+    function departmentIdMatchesPath(departmentId, department) {
+      return valueMatchesDocumentId(department.id, departmentId)
+        && (
+          !department.keys().hasAny(['_docId'])
+          || (
+            department._docId is string
+            && department._docId == departmentId
+          )
+        );
+    }
+
+    function departmentHasValidFields(departmentId, department, allowDocumentIdField) {
+      return department.keys().hasAll([
+          'id',
+          'name',
+          'status',
+          'createdAt'
+        ])
+        && (
+          (
+            allowDocumentIdField
+            && department.keys().hasOnly([
+              'id',
+              'name',
+              'description',
+              'managerId',
+              'status',
+              'createdAt',
+              '_docId'
+            ])
+          )
+          || (
+            !allowDocumentIdField
+            && department.keys().hasOnly([
+              'id',
+              'name',
+              'description',
+              'managerId',
+              'status',
+              'createdAt'
+            ])
+          )
+        )
+        && departmentIdMatchesPath(departmentId, department)
+        && (!department.keys().hasAny(['_docId']) || allowDocumentIdField)
+        && departmentHasValidName(department)
+        && departmentHasValidDescription(department)
+        && departmentHasValidManagerId(department)
+        && department.status is string
+        && department.status in ['Active', 'Inactive']
+        && isIsoTimestampString(department.createdAt);
+    }
+
+    function canCreateDepartment(departmentId) {
+      return isAdmin()
+        && departmentHasValidFields(departmentId, request.resource.data, false);
+    }
+
+    function canUpdateDepartment(departmentId) {
+      return isAdmin()
+        && departmentHasValidFields(departmentId, resource.data, true)
+        && departmentHasValidFields(departmentId, request.resource.data, true)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name',
+          'description',
+          'managerId',
+          'status',
+          '_docId'
+        ]);
+    }
+
+    function canDeleteDepartment(departmentId) {
+      return isAdmin()
+        && departmentHasValidFields(departmentId, resource.data, true);
+    }
+
+    match /authLinks/{uid} {
+      allow read, write: if false;
+    }
+
+    match /employees/{employeeId} {
+      allow read: if canReadEmployee(employeeId, resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /departments/{departmentId} {
+      allow read: if isAdmin() || isHr();
+      allow create: if canCreateDepartment(departmentId);
+      allow update: if canUpdateDepartment(departmentId);
+      allow delete: if canDeleteDepartment(departmentId);
+    }
+
+    match /projects/{projectId} {
+      allow read: if canReadProject(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /kpis/{kpiId} {
+      allow read: if canReadKpi(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /leaves/{leaveId} {
+      allow read: if canReadCanonicalEmployeeRecord(resource.data);
+      allow create: if canCreateLeave(leaveId);
+      allow update: if canUpdateLeave(leaveId);
+      allow delete: if false;
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if canReadCanonicalEmployeeRecord(resource.data);
+      allow create: if canCreateAttendance(attendanceId);
+      allow update: if canUpdateAttendance(attendanceId);
+      allow delete: if canDeleteAttendance(attendanceId);
+    }
+
+    match /payroll/{payrollId} {
+      allow read: if canReadPayroll(payrollId, resource.data);
+      allow create: if canCreatePayroll(payrollId);
+      allow update: if canUpdatePayroll(payrollId);
+      allow delete: if canDeletePayroll(payrollId);
+    }
+
+    match /leaveBalances/{employeeId} {
+      allow get: if canReadLeaveBalance(employeeId, resource.data);
+      allow list, create, update, delete: if false;
+    }
+
+    // Remaining collection rules must be added before these rules are deployed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

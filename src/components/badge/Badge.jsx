@@ -29,22 +29,22 @@ const Badge = ({ s }) => {
       label: "Pending",
     },
     processed: {
-      bg: "#1d6fec20",
+      bg: T.primaryTint,
       c: T.primary,
       label: "Processed",
     },
     draft: {
-      bg: "#5a749920",
+      bg: T.mutedGlow,
       c: T.muted,
       label: "Draft",
     },
     admin: {
-      bg: "#8b5cf620",
+      bg: T.purpleGlow,
       c: T.purple,
       label: "Admin",
     },
     hr: {
-      bg: "#00c2cb20",
+      bg: T.secondaryGlow,
       c: T.secondary,
       label: "HR",
     },
@@ -57,7 +57,7 @@ const Badge = ({ s }) => {
 
   const m =
     map[s?.toLowerCase()] || {
-      bg: "#5a749920",
+      bg: T.mutedGlow,
       c: T.muted,
       label: s,
     };

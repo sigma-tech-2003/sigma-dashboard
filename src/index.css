@@ -1,5 +1,19 @@
-*{
-  padding: 0px;
-  margin: 0px;
+@import "./theme/tokens.css";
+
+* {
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
 }

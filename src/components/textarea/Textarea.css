@@ -1,0 +1,22 @@
+.textarea-wrapper {
+  margin-bottom: var(--space-6);
+}
+
+.textarea-label {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.textarea-field {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px var(--space-5);
+  outline: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-family: inherit;
+  resize: vertical;
+}

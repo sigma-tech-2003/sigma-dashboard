@@ -6,10 +6,17 @@ import { T } from "../../theme/theme";
 import { fmt } from "../../utils/helpers";
 import PayslipModal from "./PayslipModal";
 
+const normalizedId = (value) => (value == null ? "" : String(value).trim());
+
+const isUsersProcessedPayslip = (payslip, user) =>
+  Boolean(normalizedId(payslip?.empId))
+  && normalizedId(payslip?.empId) === normalizedId(user?.id)
+  && payslip?.status === "processed";
+
 const MyPayslipsPage = ({ payroll, employees, user }) => {
   const [slip, setSlip] = useState(null);
 
-  const mine = payroll.filter(p => p.empId === user.id && p.status === "processed");
+  const mine = payroll.filter((payslip) => isUsersProcessedPayslip(payslip, user));
 
   return (
     <div>
@@ -44,7 +51,11 @@ const MyPayslipsPage = ({ payroll, employees, user }) => {
                   </div>
                 ))}
                 <button
-                  onClick={() => setSlip({ ...p, emp: employees.find(e => e.id === p.empId) })}
+                  onClick={() => setSlip({
+                    ...p,
+                    emp: employees.find((employee) =>
+                      normalizedId(employee.id) === normalizedId(p.empId)),
+                  })}
                   style={{ width: "100%", marginTop: 8, background: T.primaryGlow, border: `1px solid ${T.primary}30`, color: T.primary, padding: "8px 0", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
                   <Eye size={13} />View & Download
                 </button>

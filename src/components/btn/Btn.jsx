@@ -12,7 +12,7 @@ const Btn = ({
   const styles = {
     primary: {
       background: T.primary,
-      color: "#fff",
+      color: T.white,
       border: `1px solid ${T.primary}`,
     },
     ghost: {
@@ -22,17 +22,17 @@ const Btn = ({
     },
     success: {
       background: T.success,
-      color: "#fff",
+      color: T.white,
       border: `1px solid ${T.success}`,
     },
     danger: {
       background: T.danger,
-      color: "#fff",
+      color: T.white,
       border: `1px solid ${T.danger}`,
     },
     warning: {
       background: T.warning,
-      color: "#000",
+      color: T.black,
       border: `1px solid ${T.warning}`,
     },
     outline: {

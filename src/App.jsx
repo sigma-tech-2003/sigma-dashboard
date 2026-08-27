@@ -1,121 +1,255 @@
-// src/App.jsx
-// ✅ Security v2 — Firebase Auth manages sessions, no localStorage
-// ✅ Perf v3 — pages are code-split (React.lazy), seeding only runs after auth
-
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
-
-import { useEmployees, useKpis, useLeaves, usePayroll, useLeaveBalances } from "./firebase/useFirestore";
-import { useDepartments } from "./firebase/useDepartments";
-import { seedAll, isSeeded } from "./firebase/seedFirestore";
-import { auth, db } from "./firebase/firebaseConfig";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { collection, query, where, getDocs } from "firebase/firestore";
-
+import { lazy, Suspense, useEffect, useMemo } from "react";
+import { AppProvider, useApp } from "./app/index.js";
+import Layout from "./components/layout/Layout";
 import LoadingScreen from "./components/loading-screen/LoadingScreen";
-import Layout        from "./components/layout/Layout";
-import LoginPage     from "./pages/login-page/LoginPage";
+import {
+  APP_ROUTES,
+  canAccessRoute,
+  getDefaultRoute,
+  getRouteById,
+} from "./config/routes";
+import { useDepartments } from "./firebase/useDepartments";
+import {
+  useAttendance,
+  useEmployees,
+  useKpis,
+  useLeaveBalances,
+  useLeaves,
+  usePayroll,
+  useProjects,
+} from "./firebase/useFirestore";
+import { useHashNavigation } from "./hooks/useHashNavigation";
+import { useScopedWorkspace } from "./hooks/useScopedWorkspace";
+import LoginPage from "./pages/login-page/LoginPage";
 
-// Code-split pages — each loads only when first visited
-const Dashboard       = lazy(() => import("./pages/dashboard/Dashboard"));
-const EmployeesPage   = lazy(() => import("./pages/employees/EmployeesPage"));
-const DepartmentsPage = lazy(() => import("./pages/departments/DepartmentsPage"));
-const KPIPage         = lazy(() => import("./pages/kpi/KPIPage"));
-const LeavePage       = lazy(() => import("./pages/leave/LeavePage"));
-const PayrollPage     = lazy(() => import("./pages/payroll/PayrollPage"));
-const MyPayslipsPage  = lazy(() => import("./pages/payroll/MyPayslipsPage"));
+const PAGE_COMPONENTS = Object.fromEntries(
+  APP_ROUTES.map((route) => [route.id, lazy(route.load)]),
+);
+const FULL_COLLECTION_SCOPE = "full-collection";
 
-export default function App() {
-  const [user,      setUser]      = useState(null);
-  const [authReady, setAuthReady] = useState(false);
-  const [page,      setPage]      = useState("dashboard");
-  const [seeding,   setSeeding]   = useState(false);
-  const seedChecked = useRef(false);
+const verifiedPrincipalFromUser = (user) => {
+  const employeeId = typeof user?.id === "string" ? user.id.trim() : "";
+  const role = typeof user?.role === "string" ? user.role.trim() : "";
 
-  const { employees,    loading: loadEmp, addEmployee, updateEmployee, deleteEmployee } = useEmployees();
-  const { kpis,         loading: loadKpi, addKpi, updateKpi }                          = useKpis();
-  const { leaves,       loading: loadLv,  addLeave, updateLeaveStatus }                = useLeaves();
-  const { payroll,      loading: loadPay, addPayroll, updatePayrollStatus }            = usePayroll();
-  const { leaveBalances,loading: loadBal }                                             = useLeaveBalances();
-  const { departments,  loading: loadDept, addDepartment, updateDepartment, deleteDepartment } = useDepartments();
+  if (!employeeId || !role || typeof user?.dept !== "string") return null;
+  return { linkage: "uid", employee: user };
+};
 
-  const loading = loadEmp || loadKpi || loadLv || loadPay || loadBal || loadDept;
+function AuthenticatedWorkspace({
+  principal,
+  routeId,
+  navigate,
+  reportError,
+  clearError,
+  setLoading,
+  logout,
+}) {
+  const user = principal.employee;
+  const collectionAccess = useMemo(() => ({
+    enabled: principal.linkage === "uid" && Boolean(user.id),
+    principal,
+    subscription: { queryScope: FULL_COLLECTION_SCOPE },
+  }), [principal, user.id]);
+  const scopedWorkspace = useScopedWorkspace(principal);
+  const {
+    employees,
+    loading: employeesLoading,
+    error: employeesError,
+    addEmployee,
+    updateEmployee,
+    deleteEmployee,
+  } = useEmployees(collectionAccess);
+  const {
+    projects,
+    loading: projectsLoading,
+    error: projectsError,
+    addProject,
+    updateProject,
+    deleteProject,
+  } = useProjects(collectionAccess, scopedWorkspace);
+  const {
+    kpis,
+    loading: kpisLoading,
+    error: kpisError,
+    addKpi,
+    updateKpi,
+  } = useKpis(collectionAccess, scopedWorkspace);
+  const {
+    attendance,
+    loading: attendanceLoading,
+    error: attendanceError,
+    addAttendance,
+    updateAttendance,
+    deleteAttendance,
+  } = useAttendance(collectionAccess, employees, employeesLoading);
+  const {
+    leaves,
+    loading: leavesLoading,
+    error: leavesError,
+    addLeave,
+    updateLeaveStatus,
+  } = useLeaves(collectionAccess, employees, employeesLoading);
+  const {
+    payroll,
+    loading: payrollLoading,
+    error: payrollError,
+    addPayroll,
+    updatePayrollStatus,
+  } = usePayroll(collectionAccess);
+  const {
+    leaveBalances,
+    loading: leaveBalancesLoading,
+    error: leaveBalancesError,
+  } = useLeaveBalances(collectionAccess);
+  const {
+    departments,
+    loading: departmentsLoading,
+    error: departmentsError,
+    addDepartment,
+    updateDepartment,
+    deleteDepartment,
+  } = useDepartments(collectionAccess);
 
-  // ── Firebase Auth session listener ────────────────────────────────
+  const loading = [
+    employeesLoading,
+    projectsLoading,
+    kpisLoading,
+    attendanceLoading,
+    leavesLoading,
+    payrollLoading,
+    leaveBalancesLoading,
+    departmentsLoading,
+  ].some(Boolean);
+  const dataError = [
+    employeesError,
+    projectsError,
+    kpisError,
+    attendanceError,
+    leavesError,
+    payrollError,
+    leaveBalancesError,
+    departmentsError,
+  ].find(Boolean);
+  const requestedRoute = getRouteById(routeId);
+  const activeRoute = canAccessRoute(user, requestedRoute)
+    ? requestedRoute
+    : getDefaultRoute(user);
+
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        try {
-          // Seed on first authenticated session only (locked Firestore rules
-          // block unauthenticated writes, so seeding pre-auth never worked)
-          if (!seedChecked.current) {
-            seedChecked.current = true;
-            if (!(await isSeeded())) {
-              setSeeding(true);
-              await seedAll();
-              setSeeding(false);
-            }
-          }
+    setLoading("data", loading);
+  }, [loading, setLoading]);
 
-          const q    = query(collection(db, "employees"), where("email", "==", firebaseUser.email));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            setUser(snap.docs[0].data());
-          } else {
-            await signOut(auth);
-            setUser(null);
-          }
-        } catch {
-          setSeeding(false);
-          setUser(null);
-        }
-      } else {
-        setUser(null);
-      }
-      setAuthReady(true);
-    });
-    return () => unsub();
-  }, []);
+  useEffect(() => {
+    if (dataError) {
+      reportError("data", dataError);
+    } else {
+      clearError("data");
+    }
+  }, [clearError, dataError, reportError]);
 
-  // ── Guards ────────────────────────────────────────────────────────
-  if (seeding)           return <LoadingScreen message="Setting up your database…" />;
-  if (!authReady)        return <LoadingScreen message="Connecting to Firebase…"   />;
-  if (loading && !user)  return <LoadingScreen message="Loading data…"             />;
-  if (!user)             return <LoginPage />;
-  if (loading)           return <LoadingScreen message="Loading data…"             />;
+  useEffect(() => () => {
+    setLoading("data", false);
+    clearError("data");
+  }, [clearError, setLoading]);
 
-  // ── Logout ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (activeRoute && routeId !== activeRoute.id) {
+      navigate(activeRoute.id);
+    }
+  }, [activeRoute, navigate, routeId]);
+
+  if (loading || !activeRoute) return <LoadingScreen message="Loading data…" />;
+
   const onLogout = async () => {
-    await signOut(auth);
-    setUser(null);
-    setPage("dashboard");
+    await logout();
+    navigate("dashboard");
   };
-
-  const isAdminOrHR   = user.role === "admin" || user.role === "hr";
-  // Employees page is shared by every managerial role — each role only
-  // sees/edits the slice of employees permissions.js scopes them to.
-  const canSeeEmployees = ["admin", "hr", "manager", "tl"].includes(user.role);
-
+  const Page = PAGE_COMPONENTS[activeRoute.id];
   const sharedProps = {
     user,
-    employees, kpis, leaves, payroll, leaveBalances, departments,
-    addEmployee, updateEmployee, deleteEmployee,
-    addKpi, updateKpi,
-    addLeave, updateLeaveStatus,
-    addPayroll, updatePayrollStatus,
-    addDepartment, updateDepartment, deleteDepartment,
+    employees,
+    projects,
+    kpis,
+    attendance,
+    leaves,
+    payroll,
+    leaveBalances,
+    departments,
+    addEmployee,
+    updateEmployee,
+    deleteEmployee,
+    addProject,
+    updateProject,
+    deleteProject,
+    addKpi,
+    updateKpi,
+    addAttendance,
+    updateAttendance,
+    deleteAttendance,
+    addLeave,
+    updateLeaveStatus,
+    addPayroll,
+    updatePayrollStatus,
+    addDepartment,
+    updateDepartment,
+    deleteDepartment,
   };
 
   return (
-    <Layout user={user} page={page} setPage={setPage} onLogout={onLogout}>
+    <Layout
+      user={user}
+      page={activeRoute.id}
+      setPage={navigate}
+      onLogout={onLogout}
+    >
       <Suspense fallback={<LoadingScreen message="Loading page…" />}>
-        {page === "dashboard"                               && <Dashboard       {...sharedProps} />}
-        {page === "employees"   && canSeeEmployees          && <EmployeesPage   {...sharedProps} />}
-        {page === "departments" && isAdminOrHR              && <DepartmentsPage {...sharedProps} />}
-        {page === "kpi"                                     && <KPIPage         {...sharedProps} />}
-        {page === "leave"                                   && <LeavePage       {...sharedProps} />}
-        {page === "payroll"     && isAdminOrHR              && <PayrollPage     {...sharedProps} />}
-        {page === "payslips"    && user.role === "employee" && <MyPayslipsPage  {...sharedProps} />}
+        <Page {...sharedProps} />
       </Suspense>
     </Layout>
+  );
+}
+
+function AppContent() {
+  const { routeId, navigate } = useHashNavigation();
+  const {
+    user,
+    authReady,
+    seeding,
+    reportError,
+    clearError,
+    setLoading,
+    logout,
+  } = useApp();
+  const principal = useMemo(() => verifiedPrincipalFromUser(user), [user]);
+
+  if (seeding) return <LoadingScreen message="Setting up your database…" />;
+  if (!authReady) return <LoadingScreen message="Connecting to Firebase…" />;
+  if (!principal) return <LoginPage />;
+
+  const workspaceIdentity = JSON.stringify({
+    employeeId: principal.employee.id,
+    role: principal.employee.role,
+    department: principal.employee.dept,
+  });
+
+  return (
+    <AuthenticatedWorkspace
+      key={workspaceIdentity}
+      principal={principal}
+      routeId={routeId}
+      navigate={navigate}
+      reportError={reportError}
+      clearError={clearError}
+      setLoading={setLoading}
+      logout={logout}
+    />
+  );
+}
+
+export default function App() {
+  return (
+    <AppProvider>
+      <AppContent />
+    </AppProvider>
   );
 }

@@ -13,7 +13,7 @@ const LoadingScreen = ({ message = "Loading…" }) => (
         background: `linear-gradient(135deg,${T.primary},${T.purple})`,
       }}
     >
-      <Briefcase size={22} color="#fff" />
+      <Briefcase size={22} color={T.white} />
     </div>
 
     <div

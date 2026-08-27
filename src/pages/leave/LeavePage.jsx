@@ -4,7 +4,7 @@ import { Plus, Check, X } from "lucide-react";
 
 import { T } from "../../theme/theme";
 import { fdate } from "../../utils/helpers";
-import { scopeByEmployee } from "../../utils/permissions";
+import { can, scopeByEmployee } from "../../utils/permissions";
 import Badge       from "../../components/badge/Badge";
 import Avatar      from "../../components/avatar/Avatar";
 import Modal       from "../../components/modal/Modal";
@@ -17,10 +17,12 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
   const [modal, setModal] = useState(false);
   const [form,  setForm]  = useState({ type: "Annual" });
 
-  const isAdmin = user.role !== "employee";
+  const canApproveLeave = can(user, "approveLeave");
   // Admin/HR see all requests; manager sees their dept; tl sees their team;
   // employee sees only their own.
-  const visible  = isAdmin ? scopeByEmployee(user, leaves, employees) : leaves.filter(l => l.empId === user.id);
+  const visible  = canApproveLeave
+    ? scopeByEmployee(user, leaves, employees).filter(l => user.role !== "tl" || String(l.empId) !== String(user.id))
+    : leaves.filter(l => l.empId === user.id);
   const myBal    = leaveBalances[user.id] || {};
 
   const applyLeave = async () => {
@@ -46,15 +48,15 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>Leave Management</div>
-          <div style={{ fontSize: 12, color: T.muted }}>{isAdmin ? "All employee requests" : "Your leave overview"}</div>
+          <div style={{ fontSize: 12, color: T.muted }}>{canApproveLeave ? "All employee requests" : "Your leave overview"}</div>
         </div>
-        {!isAdmin && (
+        {!canApproveLeave && (
           <Btn onClick={() => setModal(true)}><Plus size={14} />Apply for Leave</Btn>
         )}
       </div>
 
       {/* Employee: leave balance cards */}
-      {!isAdmin && (
+      {!canApproveLeave && (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
           {Object.entries(myBal).map(([type, bal]) => (
             <div key={type} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, flex: "1 1 140px", minWidth: 140 }}>
@@ -70,10 +72,10 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
       {/* Table */}
       <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table className="data-table">
             <thead>
               <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                {[isAdmin && "Employee", "Type", "Period", "Days", "Reason", "Applied", "Status", isAdmin && "Action"]
+                {[canApproveLeave && "Employee", "Type", "Period", "Days", "Reason", "Applied", "Status", canApproveLeave && "Action"]
                   .filter(Boolean)
                   .map(h => (
                     <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: 0.8, whiteSpace: "nowrap" }}>{h}</th>
@@ -88,7 +90,7 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
                     style={{ borderBottom: `1px solid ${T.border}`, transition: "background .15s" }}
                     onMouseEnter={e => (e.currentTarget.style.background = T.cardHover)}
                     onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                    {isAdmin && (
+                    {canApproveLeave && (
                       <td style={{ padding: "12px 16px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           {emp && <Avatar emp={emp} size={28} />}
@@ -104,7 +106,7 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
                     <td style={{ padding: "12px 16px", fontSize: 12, color: T.muted, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.reason}</td>
                     <td style={{ padding: "12px 16px", fontSize: 11, color: T.muted, whiteSpace: "nowrap" }}>{fdate(l.applied)}</td>
                     <td style={{ padding: "12px 16px" }}><Badge s={l.status} /></td>
-                    {isAdmin && (
+                    {canApproveLeave && (
                       <td style={{ padding: "12px 16px" }}>
                         {l.status === "pending" ? (
                           <div style={{ display: "flex", gap: 6 }}>

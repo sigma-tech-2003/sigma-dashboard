@@ -14,7 +14,7 @@ import PayslipModal  from "./PayslipModal";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-const PayrollPage = ({ payroll, addPayroll, updatePayrollStatus, employees, user }) => {
+const PayrollPage = ({ payroll, addPayroll, updatePayrollStatus, employees }) => {
   const [modal,  setModal]  = useState(false);
   const [slip,   setSlip]   = useState(null);
   const [selEmp, setSelEmp] = useState("");
@@ -79,7 +79,7 @@ const PayrollPage = ({ payroll, addPayroll, updatePayrollStatus, employees, user
       {/* Table */}
       <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table className="data-table">
             <thead>
               <tr style={{ borderBottom: `1px solid ${T.border}` }}>
                 {["Employee","Period","Basic","Allowances","Bonus","Deductions","Tax","Net Pay","Status","Action"].map(h => (

@@ -1,0 +1,19 @@
+{
+  "name": "sigma-hrm-functions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Firebase Functions backend for Sigma HRM",
+  "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "check": "node --check index.js",
+    "test": "node --test employeeInvitationPolicy.test.js"
+  },
+  "dependencies": {
+    "firebase-admin": "14.3.0",
+    "firebase-functions": "7.3.2"
+  }
+}

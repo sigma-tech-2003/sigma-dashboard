@@ -46,13 +46,13 @@ const PayslipModal = ({ slip, onClose }) => {
       {/* Header banner */}
       <div style={{ background: `linear-gradient(135deg,${T.primary},${T.purple})`, borderRadius: 10, padding: 16, marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>{slip.emp?.name}</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: T.white }}>{slip.emp?.name}</div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,.7)" }}>{slip.emp?.pos} · {slip.emp?.dept}</div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,.7)", marginTop: 2 }}>{slip.emp?.empId}</div>
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,.7)" }}>Period</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{slip.month} {slip.year}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: T.white }}>{slip.month} {slip.year}</div>
         </div>
       </div>
 

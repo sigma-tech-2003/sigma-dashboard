@@ -114,7 +114,7 @@ const DepartmentsPage = ({
       {/* ── Table ──────────────────────────────────────────────── */}
       <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table className="data-table">
             <thead>
               <tr style={{ borderBottom: `1px solid ${T.border}` }}>
                 {["Department Name", "Manager", "Total Employees", "Status", "Actions"].map(h => (
@@ -196,7 +196,7 @@ const DepartmentsPage = ({
                           <>
                             <button
                               onClick={() => openEdit(dept)}
-                              style={{ background: "#f0a50015", border: "none", color: T.warning, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}
+                              style={{ background: T.warningTint, border: "none", color: T.warning, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}
                             >
                               <Edit size={13} />
                             </button>
@@ -249,7 +249,7 @@ const DepartmentsPage = ({
 
           {/* Description — full width */}
           <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", fontSize: 12, color: "#5a7499", marginBottom: 6, fontWeight: 600 }}>
+            <label style={{ display: "block", fontSize: 12, color: T.muted, marginBottom: 6, fontWeight: 600 }}>
               Description
             </label>
             <textarea

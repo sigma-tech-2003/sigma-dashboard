@@ -13,27 +13,16 @@ import {
 } from "recharts";
 
 import { T }          from "../../theme/theme";
-import { fmt, pct, fdate, kpiScore, perfLabel, perfColor } from "../../utils/helpers";
-import { scopeEmployees, scopeByEmployee } from "../../utils/permissions";
+import { fmt, pct, fdate, getKpiRatingSummary, getProjectKpiRatingLabel, isValidProjectKpiScore, kpiScore, perfColor } from "../../utils/helpers";
+import { scopeAttendance, scopeEmployees, scopeByEmployee, scopeProjectKpis } from "../../utils/permissions";
 import { ANNOUNCEMENTS } from "../../data/announcements";
 import Stat        from "../../components/stat/Stat";
 import Badge       from "../../components/badge/Badge";
 import Avatar      from "../../components/avatar/Avatar";
+import Card        from "../../components/card/Card";
 import ProgressBar from "../../components/ProgressBar/ProgressBar";
 
 // ── Shared building blocks (visual style copied from the original file) ───
-const Card = ({ title, right, children, style }) => (
-  <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20, ...style }}>
-    {(title || right) && (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        {title && <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{title}</div>}
-        {right}
-      </div>
-    )}
-    {children}
-  </div>
-);
-
 const EmptyRow = ({ children }) => <div style={{ color: T.muted, fontSize: 13 }}>{children}</div>;
 
 const EmployeeRow = ({ emp, sub }) => (
@@ -62,18 +51,115 @@ const LeaveRow = ({ l, emp }) => (
 const recentOf = (list, n = 5) =>
   [...list].sort((a, b) => new Date(b.joinDate || 0) - new Date(a.joinDate || 0)).slice(0, n);
 
-// There's no attendance collection yet, so "attendance" is approximated from
-// who's on approved leave today against the active headcount. Swap this for
-// a real useAttendance() hook once that module exists.
-const attendanceProxy = (scope, leaves) => {
-  const today   = new Date().toISOString().slice(0, 10);
-  const active  = scope.filter(e => e.status === "active");
-  const onLeave = new Set(
-    leaves.filter(l => l.status === "approved" && l.start <= today && l.end >= today).map(l => l.empId)
-  );
-  const present = active.filter(e => !onLeave.has(e.id)).length;
-  return { present, total: active.length, onLeave: onLeave.size };
+const normalizeAttendanceStatus = (status) => {
+  const normalized = String(status || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+  return normalized === "on leave" ? "leave" : normalized;
 };
+
+const attendanceDateValue = (value) => {
+  if (typeof value === "string") {
+    const dateValue = value.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+    if (dateValue) return dateValue;
+  }
+
+  if (!value) return "";
+  const date = typeof value?.toDate === "function" ? value.toDate() : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 10);
+};
+
+const attendanceRecordTimestamp = (record) => {
+  for (const value of [record?.updatedAt, record?.createdAt]) {
+    if (!value) continue;
+    if (typeof value?.toMillis === "function") {
+      const timestamp = value.toMillis();
+      if (Number.isFinite(timestamp)) return timestamp;
+    }
+    const date = typeof value?.toDate === "function" ? value.toDate() : new Date(value);
+    const timestamp = date.getTime();
+    if (!Number.isNaN(timestamp)) return timestamp;
+  }
+  return 0;
+};
+
+const latestAttendanceRecords = (records, employeeIds, date = "") => {
+  const targetDate = date ? attendanceDateValue(date) : "";
+  const latestByEmployeeDate = new Map();
+
+  (Array.isArray(records) ? records : []).forEach((record) => {
+    if (!record || typeof record !== "object" || record.empId == null) return;
+    const employeeId = String(record.empId);
+    const recordDate = attendanceDateValue(record.date);
+    if (!employeeIds.has(employeeId) || !recordDate || (targetDate && recordDate !== targetDate)) return;
+
+    const key = `${employeeId}:${recordDate}`;
+    const current = latestByEmployeeDate.get(key);
+    if (!current || attendanceRecordTimestamp(record) >= attendanceRecordTimestamp(current)) {
+      latestByEmployeeDate.set(key, record);
+    }
+  });
+
+  return [...latestByEmployeeDate.values()];
+};
+
+const getAttendanceSummary = (scopedEmployees, attendanceRecords, date) => {
+  const activeEmployeeIds = new Set(
+    (Array.isArray(scopedEmployees) ? scopedEmployees : [])
+      .filter(employee =>
+        employee
+        && typeof employee === "object"
+        && employee.id != null
+        && normalizeAttendanceStatus(employee.status) === "active",
+      )
+      .map(employee => String(employee.id)),
+  );
+  const summary = {
+    present: 0,
+    late: 0,
+    absent: 0,
+    leave: 0,
+    marked: 0,
+    unmarked: activeEmployeeIds.size,
+    total: activeEmployeeIds.size,
+    attended: 0,
+  };
+  if (!attendanceDateValue(date)) return summary;
+
+  latestAttendanceRecords(attendanceRecords, activeEmployeeIds, date).forEach((record) => {
+    const status = normalizeAttendanceStatus(record.status);
+    if (!["present", "late", "absent", "leave"].includes(status)) return;
+    summary[status] += 1;
+    summary.marked += 1;
+  });
+
+  summary.attended = summary.present + summary.late;
+  summary.unmarked = Math.max(0, summary.total - summary.marked);
+  return summary;
+};
+
+const getEmployeeAttendanceRate = (employeeId, attendanceRecords) => {
+  if (employeeId == null) return { percentage: null, attended: 0, total: 0 };
+  const employeeIds = new Set([String(employeeId)]);
+  const eligibleStatuses = latestAttendanceRecords(attendanceRecords, employeeIds)
+    .map(record => normalizeAttendanceStatus(record.status))
+    .filter(status => ["present", "late", "absent"].includes(status));
+  if (eligibleStatuses.length === 0) return { percentage: null, attended: 0, total: 0 };
+
+  const attended = eligibleStatuses.filter(status => status === "present" || status === "late").length;
+  return {
+    percentage: Math.round((attended / eligibleStatuses.length) * 100),
+    attended,
+    total: eligibleStatuses.length,
+  };
+};
+
+const attendanceSummaryLabel = (summary) =>
+  `${summary.marked} marked · ${summary.unmarked} unmarked · ${summary.late} late`;
 
 const payTrend = [
   { m: "Oct", total: 520000 }, { m: "Nov", total: 580000 }, { m: "Dec", total: 640000 },
@@ -145,20 +231,49 @@ const AnnouncementsCard = () => (
 // ─────────────────────────────────────────────────────────────────────────
 // ADMIN — full-system view
 // ─────────────────────────────────────────────────────────────────────────
-const AdminDashboard = ({ employees, kpis, leaves, payroll, departments }) => {
+const AdminDashboard = ({ user, projects = [], employees, kpis, attendance = [], leaves, payroll, departments }) => {
   const managers  = employees.filter(e => e.role === "manager");
   const teamLeads = employees.filter(e => e.role === "tl");
   const hrStaff   = employees.filter(e => e.role === "hr");
   const active    = employees.filter(e => e.status === "active");
-  const att       = attendanceProxy(employees, leaves);
+  const att       = getAttendanceSummary(
+    employees,
+    scopeAttendance(user, attendance, employees),
+    new Date(),
+  );
   const netPaid   = payroll.reduce((s, p) => s + (p.net || 0), 0);
-  const avgKpi    = kpis.length ? Math.round(kpis.reduce((s, k) => s + pct(k.current, k.target), 0) / kpis.length) : 0;
+  const visibleKpis = scopeProjectKpis(user, kpis, projects, employees);
+  const ratingSummary = getKpiRatingSummary(visibleKpis);
+  const averageCompletion = visibleKpis.length
+    ? Math.round(visibleKpis.reduce((sum, kpi) => sum + pct(kpi.current, kpi.target), 0) / visibleKpis.length)
+    : null;
 
   const deptData = departments.length > 0
     ? departments.map(d => ({ dept: d.name.slice(0, 4), count: employees.filter(e => e.dept === d.name && e.status === "active").length })).filter(d => d.count > 0)
     : [...new Set(employees.map(e => e.dept).filter(Boolean))].map(d => ({ dept: d.slice(0, 4), count: employees.filter(e => e.dept === d && e.status === "active").length })).filter(d => d.count > 0);
 
-  const kpiPerf = employees.filter(e => ["employee", "tl"].includes(e.role)).map(e => ({ name: e.name.split(" ")[0], score: kpiScore(kpis.filter(k => k.empId === e.id)) })).filter(e => e.score > 0);
+  const kpiEmployees = employees.filter(employee => ["employee", "tl"].includes(employee.role));
+  const employeeRatings = kpiEmployees.map((employee) => {
+    const employeeKpis = visibleKpis.filter(kpi =>
+      kpi.empId != null
+      && employee.id != null
+      && String(kpi.empId) === String(employee.id),
+    );
+    const summary = getKpiRatingSummary(employeeKpis);
+    return {
+      name: employee.name || employee.email || `Employee ${employee.id}`,
+      rating: summary.average,
+      ratedCount: summary.ratedCount,
+    };
+  }).filter(employee => employee.rating !== null);
+  const kpiProgress = kpiEmployees.map((employee) => ({
+    name: employee.name || employee.email || `Employee ${employee.id}`,
+    score: kpiScore(visibleKpis.filter(kpi =>
+      kpi.empId != null
+      && employee.id != null
+      && String(kpi.empId) === String(employee.id),
+    )),
+  })).filter(employee => employee.score > 0);
 
   return (
     <div>
@@ -173,10 +288,16 @@ const AdminDashboard = ({ employees, kpis, leaves, payroll, departments }) => {
 
       {/* Org-wide summaries */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        <Stat icon={Clock}      label="Attendance Summary" value={`${att.present}/${att.total}`} sub="Present today (approx.)" color={T.secondary} />
+        <Stat icon={Clock}      label="Attendance Today" value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)} color={T.secondary} />
         <Stat icon={Calendar}   label="Leave Summary"      value={leaves.filter(l => l.status === "pending").length} sub={`${leaves.filter(l => l.status === "approved").length} approved this period`} color={T.warning} />
         <Stat icon={DollarSign} label="Payroll Summary"    value={fmt(netPaid)} sub={`${payroll.length} payslips processed`} color={T.success} />
-        <Stat icon={Target}     label="KPI Summary"        value={kpis.length ? `${avgKpi}%` : "—"} sub="Company-wide average" color={T.purple} />
+        <Stat
+          icon={Target}
+          label="KPI Summary"
+          value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+          sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} rated · ${averageCompletion === null ? "No target completion data" : `${averageCompletion}% target/current completion`}`}
+          color={T.purple}
+        />
       </div>
 
       {/* Charts */}
@@ -216,8 +337,25 @@ const AdminDashboard = ({ employees, kpis, leaves, payroll, departments }) => {
         <PieCard title="Leave Status Overview" data={leaveStatusData(leaves)} />
       </div>
 
-      <div style={{ marginBottom: 16 }}>
-        <KpiBarCard title="Company Performance — KPI Scores" data={kpiPerf} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
+        <Card title="Company Project KPI Ratings" right={<span style={{ color: T.muted, fontSize: 11 }}>0–10 scale</span>}>
+          {employeeRatings.length === 0 ? <EmptyRow>No valid company KPI ratings yet.</EmptyRow> : (
+            <ResponsiveContainer width="100%" height={Math.max(180, employeeRatings.length * 38)}>
+              <BarChart data={employeeRatings} barSize={22} layout="vertical" margin={{ right: 42 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={T.border} horizontal={false} />
+                <XAxis type="number" domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} width={90} />
+                <Tooltip
+                  contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: T.text }}
+                  formatter={(value, _name, item) => [`${value}/10 (${item.payload.ratedCount} rated)`, "Average rating"]}
+                />
+                <Bar dataKey="rating" fill={T.purple} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
+        <KpiBarCard title="Company KPI Target Progress" data={kpiProgress} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 16, marginBottom: 16 }}>
@@ -231,7 +369,12 @@ const AdminDashboard = ({ employees, kpis, leaves, payroll, departments }) => {
             <div><strong style={{ color: T.text }}>{active.length}</strong> active employees this month</div>
             <div><strong style={{ color: T.text }}>{leaves.filter(l => l.status === "approved").length}</strong> leave requests approved</div>
             <div><strong style={{ color: T.text }}>{fmt(netPaid)}</strong> total payroll disbursed</div>
-            <div><strong style={{ color: T.text }}>{kpis.length ? `${avgKpi}%` : "—"}</strong> average KPI performance</div>
+            <div>
+              <strong style={{ color: T.text }}>
+                {ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+              </strong>{" "}
+              company KPI rating · {ratingSummary.ratedCount}/{ratingSummary.totalCount} rated
+            </div>
           </div>
         </Card>
       </div>
@@ -251,38 +394,99 @@ const ListClipboard = () => <ClipboardList size={16} color={T.muted} />;
 // ─────────────────────────────────────────────────────────────────────────
 // HR — operational access (no system settings / role management / dept delete)
 // ─────────────────────────────────────────────────────────────────────────
-const HRDashboard = ({ employees, kpis, leaves, payroll }) => {
+const HRDashboard = ({ user, projects = [], employees, kpis, attendance = [], leaves, payroll }) => {
   const active = employees.filter(e => e.status === "active");
-  const att    = attendanceProxy(employees, leaves);
-  const today  = new Date().toISOString().slice(0, 10);
-  const onLeaveToday = leaves.filter(l => l.status === "approved" && l.start <= today && l.end <= today);
+  const today = attendanceDateValue(new Date());
+  const att = getAttendanceSummary(
+    employees,
+    scopeAttendance(user, attendance, employees),
+    today,
+  );
+  const approvedLeaveToday = new Set(
+    leaves
+      .filter((leave) => {
+        const startDate = attendanceDateValue(leave.start);
+        const endDate = attendanceDateValue(leave.end);
+        return normalizeAttendanceStatus(leave.status) === "approved"
+          && leave.empId != null
+          && startDate
+          && endDate
+          && startDate <= today
+          && endDate >= today;
+      })
+      .map(leave => String(leave.empId)),
+  ).size;
   const pending = leaves.filter(l => l.status === "pending");
-  const netPaid = payroll.reduce((s, p) => s + (p.net || 0), 0);
-  const avgKpi  = kpis.length ? Math.round(kpis.reduce((s, k) => s + pct(k.current, k.target), 0) / kpis.length) : 0;
+  const recentPending = [...pending]
+    .sort((a, b) => new Date(b.applied || b.start || 0) - new Date(a.applied || a.start || 0))
+    .slice(0, 6);
+  const employeeById = new Map(employees.map(employee => [String(employee.id), employee]));
+  const totalPayroll = payroll.reduce((sum, record) => sum + (Number(record.net) || 0), 0);
+  const visibleKpis = scopeProjectKpis(user, kpis, projects, employees);
+  const ratingSummary = getKpiRatingSummary(visibleKpis);
+  const averageProgress = visibleKpis.length
+    ? Math.round(visibleKpis.reduce((sum, kpi) => sum + pct(kpi.current, kpi.target), 0) / visibleKpis.length)
+    : null;
+  const leaveStatus = leaveStatusData(leaves);
+  const hasLeaveData = leaveStatus.some(status => status.value > 0);
 
   return (
     <div>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        <Stat icon={Users}    label="Total Employees"    value={employees.length}  sub={`${active.length} active`}          color={T.primary}   />
-        <Stat icon={Clock}    label="Today's Attendance" value={`${att.present}/${att.total}`} sub="Present (approx.)"      color={T.secondary} />
-        <Stat icon={Calendar} label="Employees on Leave" value={att.onLeave}       sub="On approved leave today"            color={T.warning}   />
-        <Stat icon={ListChecks} label="Pending Requests" value={pending.length}    sub="Leave awaiting review"              color={T.danger}    />
-        <Stat icon={DollarSign} label="Payroll Overview" value={fmt(netPaid)}      sub={`${payroll.length} payslips`}       color={T.success}   />
-        <Stat icon={Target}   label="KPI Summary"        value={kpis.length ? `${avgKpi}%` : "—"} sub="All employees"       color={T.purple}    />
+        <Stat icon={Users} label="Total Employees" value={employees.length} sub={`${active.length} active`} color={T.primary} />
+        <Stat icon={Clock} label="Attendance Overview" value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)} color={T.secondary} />
+        <Stat icon={Calendar} label="Employees on Approved Leave Today" value={approvedLeaveToday} sub="Approved leave in progress" color={T.warning} />
+        <Stat icon={ListChecks} label="Pending Leave Requests" value={pending.length} sub="Awaiting review in Leave" color={T.danger} />
+        <Stat icon={DollarSign} label="Total Payroll" value={fmt(totalPayroll)} sub={`${payroll.length} payroll records`} color={T.success} />
+        <Stat
+          icon={Target}
+          label="KPI Average"
+          value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+          sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} visible KPIs rated`}
+          color={T.purple}
+        />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
-        <PieCard title="Attendance & Leave Overview" data={leaveStatusData(leaves)} />
+        {hasLeaveData
+          ? <PieCard title="Leave Status" data={leaveStatus} />
+          : (
+            <Card title="Leave Status">
+              <EmptyRow>No leave requests yet.</EmptyRow>
+            </Card>
+          )}
         <Card title="Recent Employees">
           {recentOf(employees).length === 0 ? <EmptyRow>No employees yet.</EmptyRow> :
             recentOf(employees).map(e => <EmployeeRow key={e.id} emp={e} sub={`${e.pos} · ${e.dept}`} />)}
         </Card>
       </div>
 
-      <Card title="Pending Leave Requests">
-        {pending.length === 0 ? <EmptyRow>No pending requests.</EmptyRow> :
-          pending.map(l => <LeaveRow key={l.id} l={l} emp={employees.find(e => e.id === l.empId)} />)}
-      </Card>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16 }}>
+        <Card
+          title="KPI Target Progress"
+          right={<span style={{ fontSize: 12, color: T.muted }}>{averageProgress === null ? "No KPI data" : `${averageProgress}%`}</span>}
+        >
+          {averageProgress === null ? <EmptyRow>No KPI progress data yet.</EmptyRow> : (
+            <div>
+              <ProgressBar value={averageProgress} max={100} color={perfColor(averageProgress)} />
+              <div style={{ color: T.muted, fontSize: 11, marginTop: 8 }}>
+                Average target/current progress across {visibleKpis.length} visible KPI{visibleKpis.length === 1 ? "" : "s"}.
+              </div>
+            </div>
+          )}
+        </Card>
+
+        <Card title="Pending Leave Requests">
+          {recentPending.length === 0 ? <EmptyRow>No pending requests.</EmptyRow> :
+            recentPending.map(leave => (
+              <LeaveRow
+                key={leave.id}
+                l={leave}
+                emp={employeeById.get(String(leave.empId))}
+              />
+            ))}
+        </Card>
+      </div>
     </div>
   );
 };
@@ -290,19 +494,83 @@ const HRDashboard = ({ employees, kpis, leaves, payroll }) => {
 // ─────────────────────────────────────────────────────────────────────────
 // MANAGER — scoped to their own department
 // ─────────────────────────────────────────────────────────────────────────
-const ManagerDashboard = ({ user, employees, kpis, leaves }) => {
+const ManagerDashboard = ({ user, projects = [], employees, kpis, attendance = [], leaves }) => {
   const deptEmployees = scopeEmployees(user, employees);
-  const teamLeads      = deptEmployees.filter(e => e.role === "tl");
-  const deptLeaves     = scopeByEmployee(user, leaves, employees);
-  const pendingLeaves  = deptLeaves.filter(l => l.status === "pending");
-  const deptKpis       = scopeByEmployee(user, kpis, employees);
-  const avgKpi         = deptKpis.length ? kpiScore(deptKpis) : 0;
-  const att             = attendanceProxy(deptEmployees, deptLeaves);
-  const pendingTasks    = deptKpis.filter(k => pct(k.current, k.target) < 100).length;
+  const activeEmployees = deptEmployees.filter(employee => employee.status === "active");
+  const teamLeads = deptEmployees.filter(employee => employee.role === "tl");
+  const deptLeaves = scopeByEmployee(user, leaves, employees);
+  const pendingLeaves = deptLeaves.filter(leave => leave.status === "pending");
+  const recentPendingLeaves = [...pendingLeaves]
+    .sort((a, b) => {
+      const bTime = new Date(b.applied || b.start || 0).getTime();
+      const aTime = new Date(a.applied || a.start || 0).getTime();
+      return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+    })
+    .slice(0, 6);
+  const recentEmployees = recentOf(deptEmployees, 5);
+  const employeeById = new Map(deptEmployees.map(employee => [String(employee.id), employee]));
+  const deptKpis = scopeProjectKpis(user, kpis, projects, employees);
+  const ratingSummary = getKpiRatingSummary(deptKpis);
+  const averageProgress = deptKpis.length
+    ? Math.round(deptKpis.reduce((sum, kpi) => sum + pct(kpi.current, kpi.target), 0) / deptKpis.length)
+    : null;
+  const att = getAttendanceSummary(
+    deptEmployees,
+    scopeAttendance(user, attendance, employees),
+    new Date(),
+  );
+  const pendingTasks = deptKpis.filter(kpi =>
+    kpi.status === "active"
+    && (pct(kpi.current, kpi.target) < 100 || !isValidProjectKpiScore(kpi.rating)),
+  ).length;
 
-  const perf = deptEmployees.filter(e => ["employee", "tl"].includes(e.role))
-    .map(e => ({ name: e.name.split(" ")[0], score: kpiScore(kpis.filter(k => k.empId === e.id)) }))
-    .filter(e => e.score > 0);
+  const employeeRatings = deptEmployees.map(employee => {
+    const employeeKpis = deptKpis.filter(kpi =>
+      kpi.empId != null
+      && employee.id != null
+      && String(kpi.empId) === String(employee.id),
+    );
+    const summary = getKpiRatingSummary(employeeKpis);
+    return {
+      name: employee.name || employee.email || `Employee ${employee.id}`,
+      rating: summary.average,
+      ratedCount: summary.ratedCount,
+    };
+  }).filter(employee => employee.rating !== null);
+
+  const currentMonth = new Date();
+  const monthlyCompletion = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - (5 - index), 1);
+    return {
+      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
+      month: date.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+      values: [],
+    };
+  });
+  const completionByMonth = new Map(monthlyCompletion.map(month => [month.key, month]));
+
+  deptKpis.forEach(kpi => {
+    const kpiDate = [kpi.ratedAt, kpi.updatedAt, kpi.createdAt]
+      .filter(Boolean)
+      .map(value => new Date(value))
+      .find(date => !Number.isNaN(date.getTime()));
+    const target = Number(kpi.target);
+    const current = Number(kpi.current);
+
+    if (!kpiDate || !Number.isFinite(target) || target <= 0 || !Number.isFinite(current) || current < 0) return;
+
+    const monthKey = `${kpiDate.getFullYear()}-${String(kpiDate.getMonth() + 1).padStart(2, "0")}`;
+    completionByMonth.get(monthKey)?.values.push(pct(current, target));
+  });
+
+  const monthlyData = monthlyCompletion.map(month => ({
+    month: month.month,
+    completion: month.values.length
+      ? Math.round(month.values.reduce((sum, value) => sum + value, 0) / month.values.length)
+      : 0,
+    hasData: month.values.length > 0,
+  }));
+  const hasMonthlyData = monthlyData.some(month => month.hasData);
 
   return (
     <div>
@@ -312,37 +580,90 @@ const ManagerDashboard = ({ user, employees, kpis, leaves }) => {
       </div>
 
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        <Stat icon={Users}      label="Total Employees"      value={deptEmployees.length}         sub={`${deptEmployees.filter(e => e.status === "active").length} active`} color={T.primary}   />
-        <Stat icon={ShieldCheck} label="Total Team Leads"    value={teamLeads.length}              sub="Reporting to you"                                                  color={T.secondary} />
-        <Stat icon={Calendar}   label="Pending Leave Requests" value={pendingLeaves.length}        sub="Awaiting your approval"                                            color={T.warning}   />
-        <Stat icon={Target}     label="Average KPI Score"    value={deptKpis.length ? `${avgKpi}%` : "—"} sub={perfLabel(avgKpi)}                                          color={perfColor(avgKpi)} />
-        <Stat icon={Clock}      label="Attendance Summary"   value={`${att.present}/${att.total}`} sub="Present today (approx.)"                                          color={T.success}   />
-        <Stat icon={ListChecks} label="Pending Tasks"        value={pendingTasks}                  sub="KPI items in progress"                                            color={T.danger}    />
+        <Stat icon={Users} label="Department Employee Count" value={deptEmployees.length} sub={user.dept} color={T.primary} />
+        <Stat icon={UserCog} label="Active Employees" value={activeEmployees.length} sub={`${deptEmployees.length - activeEmployees.length} inactive`} color={T.success} />
+        <Stat icon={ShieldCheck} label="Team Leads" value={teamLeads.length} sub="In your department" color={T.secondary} />
+        <Stat icon={Calendar} label="Pending Leave Requests" value={pendingLeaves.length} sub="Awaiting review in Leave" color={T.warning} />
+        <Stat icon={Clock} label="Attendance Summary" value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)} color={T.secondary} />
+        <Stat icon={ListChecks} label="Pending KPI Tasks" value={pendingTasks} sub="Active, incomplete or unrated" color={T.danger} />
+        <Stat
+          icon={Target}
+          label="Department KPI Average"
+          value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+          sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} scoped KPIs rated`}
+          color={T.purple}
+        />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
-        <KpiBarCard title="Department Performance" data={perf} />
+        <Card
+          title="Employee KPI Rating Comparison"
+          right={<span style={{ color: T.muted, fontSize: 11 }}>0–10 scale</span>}
+        >
+          {employeeRatings.length === 0 ? <EmptyRow>No valid employee KPI ratings yet.</EmptyRow> : (
+            <ResponsiveContainer width="100%" height={Math.max(180, employeeRatings.length * 38)}>
+              <BarChart data={employeeRatings} barSize={22} layout="vertical" margin={{ right: 42 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={T.border} horizontal={false} />
+                <XAxis type="number" domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} width={90} />
+                <Tooltip
+                  contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: T.text }}
+                  formatter={(value, _name, item) => [`${value}/10 (${item.payload.ratedCount} rated)`, "Average rating"]}
+                />
+                <Bar dataKey="rating" fill={T.purple} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
+
         <Card title="Monthly Productivity">
-          <ResponsiveContainer width="100%" height={160}>
-            <AreaChart data={payTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-              <XAxis dataKey="m" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis hide />
-              <Tooltip contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }} labelStyle={{ color: T.text }} />
-              <Area type="monotone" dataKey="total" stroke={T.secondary} strokeWidth={2} fill={`${T.secondary}25`} />
-            </AreaChart>
-          </ResponsiveContainer>
+          {!hasMonthlyData ? <EmptyRow>No dated KPI completion data is available for the latest six months.</EmptyRow> : (
+            <ResponsiveContainer width="100%" height={190}>
+              <BarChart data={monthlyData} barSize={24}>
+                <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false} />
+                <XAxis dataKey="month" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis domain={[0, 100]} tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={value => `${value}%`} />
+                <Tooltip
+                  contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: T.text }}
+                  formatter={(value, _name, item) => [item.payload.hasData ? `${value}%` : "No data", "Average completion"]}
+                />
+                <Bar dataKey="completion" radius={[4, 4, 0, 0]}>
+                  {monthlyData.map(month => <Cell key={month.month} fill={month.hasData ? T.secondary : T.border} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <Card
+          title="Department KPI Target Progress"
+          right={<span style={{ color: T.muted, fontSize: 12 }}>{averageProgress === null ? "No KPI data" : `${averageProgress}%`}</span>}
+        >
+          {averageProgress === null ? <EmptyRow>No KPI progress data yet.</EmptyRow> : (
+            <div>
+              <ProgressBar value={averageProgress} max={100} color={perfColor(averageProgress)} />
+              <div style={{ color: T.muted, fontSize: 11, marginTop: 8 }}>
+                Average target/current completion across {deptKpis.length} scoped KPI{deptKpis.length === 1 ? "" : "s"}.
+              </div>
+            </div>
+          )}
         </Card>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 16, marginBottom: 16 }}>
-        <Card title="Recent Employees">
-          {recentOf(deptEmployees).length === 0 ? <EmptyRow>No employees yet.</EmptyRow> :
-            recentOf(deptEmployees).map(e => <EmployeeRow key={e.id} emp={e} sub={e.pos} />)}
+        <Card title="Recent Department Employees">
+          {recentEmployees.length === 0 ? <EmptyRow>No department employees yet.</EmptyRow> :
+            recentEmployees.map(employee => <EmployeeRow key={employee.id} emp={employee} sub={employee.pos} />)}
         </Card>
         <Card title="Pending Leave Requests">
-          {pendingLeaves.length === 0 ? <EmptyRow>No pending requests.</EmptyRow> :
-            pendingLeaves.map(l => <LeaveRow key={l.id} l={l} emp={employees.find(e => e.id === l.empId)} />)}
+          {recentPendingLeaves.length === 0 ? <EmptyRow>No pending requests.</EmptyRow> :
+            recentPendingLeaves.map(leave => (
+              <LeaveRow key={leave.id} l={leave} emp={employeeById.get(String(leave.empId))} />
+            ))}
         </Card>
       </div>
     </div>
@@ -352,17 +673,48 @@ const ManagerDashboard = ({ user, employees, kpis, leaves }) => {
 // ─────────────────────────────────────────────────────────────────────────
 // TEAM LEAD — scoped to their own team (matched via employee.teamLeadId)
 // ─────────────────────────────────────────────────────────────────────────
-const TLDashboard = ({ user, employees, kpis, leaves }) => {
-  const team          = scopeEmployees(user, employees).filter(e => e.id !== user.id);
+const TLDashboard = ({ user, projects = [], employees, kpis, attendance = [], leaves }) => {
+  const team          = scopeEmployees(user, employees).filter(e => String(e.id) !== String(user.id));
   const teamLeaves    = scopeByEmployee(user, leaves, employees);
   const pendingLeaves = teamLeaves.filter(l => l.status === "pending");
-  const teamKpis      = scopeByEmployee(user, kpis, employees);
-  const avgKpi        = teamKpis.length ? kpiScore(teamKpis) : 0;
-  const att            = attendanceProxy(team, teamLeaves);
-  const pendingTasks   = teamKpis.filter(k => pct(k.current, k.target) < 100).length;
+  const teamKpis      = scopeProjectKpis(user, kpis, projects, employees);
+  const ratingSummary = getKpiRatingSummary(teamKpis);
+  const att            = getAttendanceSummary(
+    team,
+    scopeAttendance(user, attendance, employees),
+    new Date(),
+  );
+  const pendingTasks   = teamKpis.filter(kpi =>
+    String(kpi.status || "").trim().toLowerCase() === "active"
+    && (pct(kpi.current, kpi.target) < 100 || !isValidProjectKpiScore(kpi.rating)),
+  ).length;
   const taskProgress   = teamKpis.length ? Math.round(teamKpis.reduce((s, k) => s + pct(k.current, k.target), 0) / teamKpis.length) : 0;
 
-  const productivity = team.map(e => ({ name: e.name.split(" ")[0], score: kpiScore(kpis.filter(k => k.empId === e.id)) })).filter(e => e.score > 0);
+  const employeeMetrics = team.map((employee) => {
+    const employeeKpis = teamKpis.filter(kpi =>
+      kpi.empId != null
+      && employee.id != null
+      && String(kpi.empId) === String(employee.id),
+    );
+    const employeeRating = getKpiRatingSummary(employeeKpis);
+    const completion = employeeKpis.length
+      ? Math.round(employeeKpis.reduce((sum, kpi) => sum + pct(kpi.current, kpi.target), 0) / employeeKpis.length)
+      : 0;
+
+    return {
+      employee,
+      completion,
+      rating: employeeRating.average,
+      ratedCount: employeeRating.ratedCount,
+    };
+  });
+  const teamRatings = employeeMetrics
+    .filter(metric => metric.rating !== null)
+    .map(metric => ({
+      name: metric.employee.name || metric.employee.email || `Employee ${metric.employee.id}`,
+      rating: metric.rating,
+      ratedCount: metric.ratedCount,
+    }));
 
   return (
     <div>
@@ -373,27 +725,47 @@ const TLDashboard = ({ user, employees, kpis, leaves }) => {
 
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
         <Stat icon={Users}    label="Team Size"            value={team.length}                    sub={`${team.filter(e => e.status === "active").length} active`} color={T.primary}   />
-        <Stat icon={Clock}    label="Team Attendance"      value={`${att.present}/${att.total}`}  sub="Present today (approx.)"                                    color={T.secondary} />
+        <Stat icon={Clock}    label="Team Attendance"      value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)}                                color={T.secondary} />
         <Stat icon={Calendar} label="Pending Leave Requests" value={pendingLeaves.length}         sub="Awaiting your review"                                       color={T.warning}   />
-        <Stat icon={Target}   label="Average KPI Score"    value={teamKpis.length ? `${avgKpi}%` : "—"} sub={perfLabel(avgKpi)}                                    color={perfColor(avgKpi)} />
-        <Stat icon={TrendingUp} label="Task Progress"      value={teamKpis.length ? `${taskProgress}%` : "—"} sub={`${pendingTasks} pending`}                       color={T.success}   />
+        <Stat icon={Target}   label="Team KPI Rating"      value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`} sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} scoped KPIs rated`} color={T.purple} />
+        <Stat icon={TrendingUp} label="Task Progress"      value={teamKpis.length ? `${taskProgress}%` : "—"} sub={`${pendingTasks} pending KPI task${pendingTasks === 1 ? "" : "s"}`} color={T.success} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
-        <KpiBarCard title="Team Performance" data={productivity} />
+        <Card title="Team KPI Ratings" right={<span style={{ color: T.muted, fontSize: 11 }}>0–10 scale</span>}>
+          {teamRatings.length === 0 ? <EmptyRow>No valid team KPI ratings yet.</EmptyRow> : (
+            <ResponsiveContainer width="100%" height={Math.max(180, teamRatings.length * 38)}>
+              <BarChart data={teamRatings} barSize={22} layout="vertical" margin={{ right: 42 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={T.border} horizontal={false} />
+                <XAxis type="number" domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} width={90} />
+                <Tooltip
+                  contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: T.text }}
+                  formatter={(value, _name, item) => [`${value}/10 (${item.payload.ratedCount} rated)`, "Average rating"]}
+                />
+                <Bar dataKey="rating" fill={T.purple} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
         <Card title="Employee Productivity">
-          {team.length === 0 ? <EmptyRow>No team members assigned yet.</EmptyRow> : team.map(e => {
-            const s = kpiScore(kpis.filter(k => k.empId === e.id));
-            return (
-              <div key={e.id} style={{ marginBottom: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontSize: 13, color: T.text }}>{e.name}</span>
-                  <span style={{ fontSize: 12, color: perfColor(s), fontWeight: 700 }}>{s}%</span>
+          {employeeMetrics.length === 0 ? <EmptyRow>No team members assigned yet.</EmptyRow> : employeeMetrics.map(metric => (
+              <div key={metric.employee.id} style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, color: T.text }}>
+                    {metric.employee.name || metric.employee.email || `Employee ${metric.employee.id}`}
+                  </span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12, fontWeight: 700 }}>
+                    <span style={{ color: perfColor(metric.completion) }}>Completion {metric.completion}%</span>
+                    <span style={{ color: T.purple }}>
+                      Rating {metric.rating === null ? "Not Rated" : `${metric.rating}/10`}
+                    </span>
+                  </div>
                 </div>
-                <ProgressBar value={s} max={100} color={perfColor(s)} />
+                <ProgressBar value={metric.completion} max={100} color={perfColor(metric.completion)} />
               </div>
-            );
-          })}
+            ))}
         </Card>
       </div>
 
@@ -409,14 +781,37 @@ const TLDashboard = ({ user, employees, kpis, leaves }) => {
 // ─────────────────────────────────────────────────────────────────────────
 // EMPLOYEE — own data only
 // ─────────────────────────────────────────────────────────────────────────
-const EmployeeDashboard = ({ user, kpis, leaves, payroll, leaveBalances }) => {
-  const myKpis   = kpis.filter(k => k.empId === user.id);
-  const myLeaves = leaves.filter(l => l.empId === user.id);
-  const myScore  = kpiScore(myKpis);
+const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendance = [], leaves, payroll, leaveBalances }) => {
+  const myKpis   = scopeProjectKpis(user, kpis, projects, employees);
+  const myLeaves = leaves.filter(leave =>
+    leave.empId != null
+    && user.id != null
+    && String(leave.empId) === String(user.id),
+  );
+  const ratingSummary = getKpiRatingSummary(myKpis);
+  const completionValues = myKpis
+    .map(kpi => pct(kpi.current, kpi.target))
+    .filter(Number.isFinite);
+  const averageCompletion = completionValues.length
+    ? Math.round(completionValues.reduce((sum, value) => sum + value, 0) / completionValues.length)
+    : null;
+  const projectById = new Map(
+    projects
+      .filter(project => project?.id != null)
+      .map(project => [String(project.id), project]),
+  );
   const myBal    = leaveBalances[user.id] || {};
   const annualLeft = myBal.Annual?.r ?? 15;
-  const lastPayslip = payroll.find(p => p.empId === user.id);
+  const lastPayslip = payroll.find(record =>
+    record.empId != null
+    && user.id != null
+    && String(record.empId) === String(user.id),
+  );
   const completedTasks = myKpis.filter(k => pct(k.current, k.target) >= 100).length;
+  const myAttendance = getEmployeeAttendanceRate(
+    user.id,
+    scopeAttendance(user, attendance, employees),
+  );
 
   return (
     <div>
@@ -426,24 +821,61 @@ const EmployeeDashboard = ({ user, kpis, leaves, payroll, leaveBalances }) => {
       </div>
 
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        <Stat icon={Target}     label="Monthly KPI Score" value={`${myScore}%`}        sub={perfLabel(myScore)}                                                color={perfColor(myScore)} />
+        <Stat
+          icon={Target}
+          label="Project KPI Rating"
+          value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+          sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} rated · ${averageCompletion === null ? "No target/current completion data" : `${averageCompletion}% average target/current completion`}`}
+          color={T.purple}
+        />
         <Stat icon={Calendar}   label="Leave Balance"     value={`${annualLeft} days`} sub="Annual leave remaining"                                            color={T.warning}          />
-        <Stat icon={Clock}      label="Attendance %"      value={myLeaves.length ? `${Math.max(0, 100 - myLeaves.reduce((s, l) => s + (l.status === "approved" ? l.days : 0), 0))}%` : "100%"} sub="Estimated, based on leave taken" color={T.secondary} />
+        <Stat icon={Clock}      label="Attendance %"      value={myAttendance.percentage === null ? "Not Marked" : `${myAttendance.percentage}%`} sub={myAttendance.total ? `${myAttendance.attended}/${myAttendance.total} present or late` : "No eligible attendance records"} color={T.secondary} />
         <Stat icon={DollarSign} label="My Payslips"       value={lastPayslip ? fmt(lastPayslip.net) : "—"} sub={lastPayslip ? `${lastPayslip.month} ${lastPayslip.year}` : "No payslip yet"} color={T.success} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
         <Card title="My KPIs — Performance">
           {myKpis.length === 0 ? <EmptyRow>No KPIs assigned yet.</EmptyRow> : myKpis.map(k => {
-            const p = pct(k.current, k.target);
+            const rawCompletion = pct(k.current, k.target);
+            const p = Number.isFinite(rawCompletion) ? rawCompletion : 0;
+            const hasValidProgress = Number.isFinite(Number(k.current))
+              && Number(k.current) >= 0
+              && Number.isFinite(Number(k.target))
+              && Number(k.target) > 0;
+            const project = k.projectId == null ? null : projectById.get(String(k.projectId));
+            const projectTitle = project
+              ? (project.title || project.name || "Untitled project")
+              : "Legacy KPI";
+            const hasValidRating = isValidProjectKpiScore(k.rating);
+            const ratingText = hasValidRating
+              ? `${Number(k.rating)}/10 · ${getProjectKpiRatingLabel(k.rating)}`
+              : "Not Rated";
             return (
-              <div key={k.id} style={{ marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontSize: 13, color: T.text, fontWeight: 500 }}>{k.title}</span>
-                  <span style={{ fontSize: 12, color: perfColor(p), fontWeight: 700 }}>{p}%</span>
+              <div key={k.id ?? k._docId ?? `${k.empId}-${k.projectId}`} style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+                  <div>
+                    <div style={{ fontSize: 13, color: T.text, fontWeight: 500 }}>
+                      {k.title || "Untitled KPI"}
+                    </div>
+                    <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{projectTitle}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 12, color: perfColor(p), fontWeight: 700 }}>
+                      Completion {p}%
+                    </div>
+                    <div style={{ fontSize: 11, color: hasValidRating ? T.purple : T.muted, marginTop: 2 }}>
+                      Rating {ratingText}
+                    </div>
+                  </div>
                 </div>
-                <ProgressBar value={k.current} max={k.target} color={perfColor(p)} />
-                <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{k.current} / {k.target} · Weight: {k.weight}%</div>
+                <ProgressBar
+                  value={hasValidProgress ? Number(k.current) : 0}
+                  max={hasValidProgress ? Number(k.target) : 100}
+                  color={perfColor(p)}
+                />
+                <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>
+                  {k.current ?? "—"} / {k.target ?? "—"} · Weight: {k.weight ?? "—"}%
+                </div>
               </div>
             );
           })}

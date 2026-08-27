@@ -1,0 +1,19 @@
+.form-feedback {
+  margin-bottom: var(--space-6);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid;
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-sm);
+}
+
+.form-feedback--error {
+  border-color: color-mix(in srgb, var(--color-danger) 30%, transparent);
+  background: var(--color-danger-glow);
+  color: var(--color-danger);
+}
+
+.form-feedback--success {
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+  background: var(--color-success-glow);
+  color: var(--color-success);
+}

@@ -1,7 +1,7 @@
 import "./Stat.css";
 import { T } from "../../theme/theme";
 
-const Stat = ({ icon: Icon, label, value, sub, color, glow }) => (
+const Stat = ({ icon: Icon, label, value, sub, color }) => (
   <div
     className="stat"
     style={{
