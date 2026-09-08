@@ -1,11 +1,13 @@
-# Frontend Rules (for Codex)
+# Project Rules
 
 > These are fixed rules. Do not change, remove, or reinterpret any rule below. Only implementation details are flexible.
 
 ## 1. Stack (locked)
 
 - React
-- TypeScript
+- JavaScript (JSX) — not TypeScript. There is no `tsconfig.json` and no TypeScript build
+  step; `src/` is `.js` and `.jsx` only. `@types/react` and `@types/react-dom` are present
+  as devDependencies for editor tooling and do not imply a TypeScript migration.
 - Vite
 - GSAP (animation)
 
@@ -49,17 +51,17 @@ src/
   constants/
   theme/
   assets/
-  features/
-    employees/
-    departments/
-    teams/
+  pages/
     attendance/
-    leave/
-    payroll/
-    reports/
-    projects/
+    dashboard/
+    departments/
+    employees/
     kpi/
-    settings/
+    leave/
+    login-page/
+    payroll/
+    projects/
+    reports/
 ```
 
 Rules:
@@ -139,3 +141,51 @@ Requirements:
 - Prefer animating `transform` and `opacity`.
 - Avoid animating layout-triggering properties (`width`, `height`, `top`, `left`) unless truly required.
 - Use GSAP batching/staggering and efficient ScrollTrigger usage.
+
+## 6. Backend
+
+Express 5 + PostgreSQL, living under `backend/` with its own `package.json`. ESM
+(`"type": "module"`), Node >= 22. Dependencies: `express`, `pg`, `zod`, `helmet`, `cors`,
+`dotenv`.
+
+This is a foundation only. The React app does not call this API yet, and Firebase Auth,
+Firestore and Cloud Functions are still the live system. The legacy Firebase layer
+(`functions/`, `firestore.rules`, `src/firebase/`) is being migrated away from, not
+extended.
+
+### Layering
+
+```
+Route → Controller → Service → Repository → pg pool → PostgreSQL
+```
+
+- `src/routes`, `src/controllers`: HTTP transport only — no business logic.
+- `src/services`: business logic and scope enforcement.
+- `src/repositories`: all PostgreSQL data access. Nothing above this layer issues SQL.
+- `src/middleware`: error handling, request identity, authentication boundaries.
+- `src/db`: connection pool, migrator, and `src/db/migrations` SQL files.
+
+Authoritative authorization belongs here, not in the frontend (see section 2).
+
+### Commands
+
+Run from `backend/`:
+
+| Command | Runs |
+|---|---|
+| `npm run dev` | `node --watch src/server.js` |
+| `npm start` | `node src/server.js` |
+| `npm run db:migrate` | `node scripts/migrate.js` |
+| `npm run db:validate` | `node scripts/validate-schema.js` |
+| `npm test` | `node --test` |
+| `npm run check` | syntax-checks the server and both scripts |
+
+`db:migrate` is the only command that connects to PostgreSQL. It is deliberately not
+invoked by the API, the tests, or schema validation. Do not run it against a database you
+did not intend to change, and do not import existing Firebase data without a separate,
+approved migration step.
+
+### Configuration
+
+Copy `backend/.env.example` to `backend/.env` for local development. Never commit
+`backend/.env` — it is gitignored, and `.env.example` must only ever contain placeholders.
