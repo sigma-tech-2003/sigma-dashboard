@@ -70,8 +70,11 @@ service cloud.firestore {
           'updatedAt'
         ])
         && isSafeDocumentId(get(authLinkPath()).data.employeeId)
-        && isIsoTimestampString(get(authLinkPath()).data.createdAt)
-        && isIsoTimestampString(get(authLinkPath()).data.updatedAt);
+        // authLinks are created only by trusted Admin SDK services. The session
+        // verifier accepts legacy parseable timestamp strings, so Rules must not
+        // require a newer, more restrictive serialization to establish identity.
+        && isNonEmptyString(get(authLinkPath()).data.createdAt, 64)
+        && isNonEmptyString(get(authLinkPath()).data.updatedAt, 64);
     }
 
     function currentEmployeeId() {
@@ -92,9 +95,9 @@ service cloud.firestore {
           'dept'
         ])
         && currentEmployeeData().uid is string
-        && currentEmployeeData().uid == request.auth.uid
+        && currentEmployeeData().uid.trim() == request.auth.uid
         && currentEmployeeData().status is string
-        && currentEmployeeData().status == 'active'
+        && currentEmployeeData().status.trim().lower() == 'active'
         && currentEmployeeData().role is string
         && isSupportedRole(currentEmployeeData().role)
         && isNonEmptyString(currentEmployeeData().dept, 120);
@@ -300,23 +303,28 @@ service cloud.firestore {
 
     function canReadCanonicalEmployeeRecord(record) {
       return hasActiveEmployeeIdentity()
-        && hasCanonicalEmployeeReference(record)
         && (
           isAdmin()
           || isHr()
           || (
             isManager()
+            && hasCanonicalEmployeeReference(record)
             && referencedEmployeeHasDepartment(record)
             && referencedEmployeeData(record).dept == currentEmployeeData().dept
           )
           || (
             isTeamLead()
+            && hasCanonicalEmployeeReference(record)
             && (
               record.empId == currentEmployeeId()
               || referencedEmployeeIsOnCurrentTeam(record)
             )
           )
-          || (isEmployee() && record.empId == currentEmployeeId())
+          || (
+            isEmployee()
+            && hasCanonicalEmployeeReference(record)
+            && record.empId == currentEmployeeId()
+          )
         );
     }
 

@@ -6,6 +6,10 @@ const { getAuth } = require("firebase-admin/auth");
 const { getFirestore } = require("firebase-admin/firestore");
 const { HttpsError, onCall } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
+
+const VERIFY_AUTH_SESSION_ALLOWED_ORIGINS = Object.freeze([
+  "https://sigma-dashboard-theta.vercel.app",
+]);
 const {
   EmployeeInvitationServiceError,
   createEmployeeInvitationService,
@@ -666,7 +670,12 @@ exports.linkLegacyEmployeeUid = onCall(async (request) => {
   }
 });
 
-exports.verifyAuthSession = onCall(async (request) => {
+exports.verifyAuthSession = onCall({
+  // onCall owns the callable protocol and CORS preflight handling. It accepts
+  // POST only and allows the Firebase callable SDK's Authorization and JSON
+  // Content-Type request headers for this exact production origin.
+  cors: VERIFY_AUTH_SESSION_ALLOWED_ORIGINS,
+}, async (request) => {
   try {
     return await authSessionVerificationService.verifyAuthSession(
       request.auth?.uid,
