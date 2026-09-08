@@ -1,0 +1,14 @@
+DROP TRIGGER IF EXISTS employees_set_updated_at ON employees;
+DROP TRIGGER IF EXISTS users_set_updated_at ON users;
+DROP TRIGGER IF EXISTS teams_set_updated_at ON teams;
+DROP TRIGGER IF EXISTS departments_set_updated_at ON departments;
+DROP TRIGGER IF EXISTS companies_set_updated_at ON companies;
+DROP FUNCTION IF EXISTS set_updated_at();
+DROP TABLE IF EXISTS employees;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS teams;
+DROP TABLE IF EXISTS departments;
+DROP TABLE IF EXISTS companies;
+DROP TYPE IF EXISTS employment_status;
+DROP TYPE IF EXISTS account_status;
+DROP TYPE IF EXISTS user_role;
