@@ -49,3 +49,18 @@ DROP TYPE IF EXISTS leave_type;
 DROP TYPE IF EXISTS employment_status;
 DROP TYPE IF EXISTS account_status;
 DROP TYPE IF EXISTS user_role;
+
+-- Clear this migration's ledger row. runMigrations() records the id in
+-- schema_migrations when the up migration runs; without this DELETE the ledger keeps
+-- claiming the migration is applied after everything it created has been dropped, and
+-- the next db:migrate reports "Database is current" against an empty database and
+-- creates nothing. rollbackLastMigration() aborts if this row survives.
+--
+-- Guarded so the file stays runnable against a database that never had it applied,
+-- matching the IF EXISTS style of every statement above.
+DO $$
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    DELETE FROM schema_migrations WHERE id = '001_initial_core_hr_hierarchy';
+  END IF;
+END $$;

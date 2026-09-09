@@ -10,9 +10,10 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check scripts/migrate.js && node --check scripts/validate-schema.js",
+    "check": "node --check src/server.js && node --check src/db/migrator.js && node --check scripts/migrate.js && node --check scripts/validate-schema.js",
     "test": "node --test",
     "db:migrate": "node scripts/migrate.js",
+    "db:rollback": "node src/db/migrator.js",
     "db:validate": "node scripts/validate-schema.js"
   },
   "dependencies": {
