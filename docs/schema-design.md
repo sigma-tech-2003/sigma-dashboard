@@ -4,9 +4,9 @@ Target schema for the Firebase → Postgres migration, written against the settl
 decisions. Every table maps explicitly to its Firestore source, documented in
 [firebase-inventory.md](firebase-inventory.md) and [auth-matrix.md](auth-matrix.md).
 
-**This document proposes; it changes nothing.** The existing migration
-`backend/src/db/migrations/001_initial_core_hr_hierarchy.up.sql` is untouched and does not
-yet match this design — see [§9 D2](#d2--rewrite-001-or-add-002).
+**Status: implemented.** `backend/src/db/migrations/001_initial_core_hr_hierarchy.up.sql`
+and its `.down.sql` now implement this design in full, and `backend/test/` asserts it.
+The migration has not been applied to any database — see [§9 D2](#d2--rewrite-001-or-add-002).
 
 Sequencing is in [migration-plan.md](migration-plan.md). Open decisions are in [§9](#9-decisions-i-need-from-you).
 
@@ -24,7 +24,7 @@ Sequencing is in [migration-plan.md](migration-plan.md). Open decisions are in [
 | TL deletion requires a replacement from that TL's own members | `ON DELETE RESTRICT` on `employees.team_lead_id` — the database refuses to orphan |
 | Leave balances computed, not stored | `leaveBalances` **dropped**; a view derives usage from `leaves` |
 | TL self-approval ban, KPI self-rating ban, legacy-KPI rating ban | all three as `CHECK` constraints |
-| Soft vs hard delete undecided | `deleted_at` on every business table, partial unique indexes, and [§8](#8-soft-vs-hard-delete--every-place-the-choice-matters) enumerating what changes either way |
+| **Soft delete for `employees`, `payroll` and `leaves`; hard delete elsewhere** (D1) | `deleted_at` on every business table except `companies` (singleton) and `project_assignments` (pure join); every uniqueness rule is a partial index `WHERE deleted_at IS NULL`. [§8](#8-soft-vs-hard-delete--every-place-the-choice-matters) records what the choice changes |
 
 ---
 
@@ -707,9 +707,11 @@ into `users`, and `leaveBalances` becomes a view.
 
 ## 8. Soft vs hard delete — every place the choice matters
 
-Undecided per your instruction. The design carries `deleted_at timestamptz` on every business
-table so either is possible without a schema rewrite. **These are the points where the answer
-changes behavior**, each needing a decision when you make the call:
+**Settled (D1): soft delete for `employees`, `payroll` and `leaves`; hard delete everywhere
+else.** `deleted_at timestamptz` is carried on every business table except `companies` (a
+singleton that is never deleted) and `project_assignments` (a pure join row). The points
+below are where that choice has consequences — items 1-4 are now answered, items 5-9 remain
+open and are called out as such:
 
 1. **Unique indexes.** Every uniqueness rule is written `WHERE deleted_at IS NULL`
    (`users_email_unique`, `employees_number_unique`, `departments_name_unique`,
@@ -762,28 +764,35 @@ changes behavior**, each needing a decision when you make the call:
 Everything below is either explicitly undecided, a choice I made that you should confirm, or
 an ambiguity carried forward from the earlier documents rather than silently resolved.
 
-### D1 — Soft or hard delete
-Stated as undecided. §8 lists the nine consequences. My recommendation is **soft delete for
-`employees`, `payroll` and `leaves`** (audit and statutory reasons) and **hard delete for
-`project_assignments`** (pure join rows), but this is your call and it changes items 1-4
-materially.
+### D1 — Soft or hard delete — ✅ SETTLED
+**Soft delete for `employees`, `payroll` and `leaves`; hard delete everywhere else.**
+Implemented: `deleted_at` on every business table except `companies` and
+`project_assignments`, and every uniqueness rule is partial on `deleted_at IS NULL`.
 
-### D2 — Rewrite `001` or add `002`
-This design contradicts `001` in four ways: `first_name`/`last_name`, the `teams` table,
-`employees.team_id`, and missing compensation columns. Since `001` appears never to have been
-applied to any database — `db:migrate` is documented as the only command that connects
-(`backend/README.md:24-26`) and `AGENTS.md` forbids running it casually — **rewriting `001` in
-place is cleaner than layering a `002` that drops a table just created.** Confirm no
-environment has already applied `001`. I did not modify it, per your constraints.
+Consequence to carry into Phase 1, restated because it is easy to lose: **`ON DELETE
+RESTRICT` does not fire on a soft delete.** `employees` is soft-deleted, so the
+database-level guarantee that a team lead cannot be orphaned (§4.4) only applies to a hard
+`DELETE`. Under the settled policy the TL-reassignment requirement is a **service-layer
+obligation**, with the foreign key as a backstop for any code path that does hard-delete.
+§8 items 5-9 remain open.
 
-### D3 — Realtime behavior is lost, and AGENTS.md forbids that
-`src/services/firestoreService.js:393` uses `onSnapshot`. The app is **live-updating today**:
-approve a leave and every open dashboard reflects it immediately. A REST API does not do this.
-`AGENTS.md` §1 states *"During any backend or database migration, the existing frontend
-architecture and UI behavior must stay unchanged."* A REST cutover violates that as written.
-Options: accept polling (simplest, changes perceived behavior); add SSE or WebSockets
-(preserves behavior, significant scope); or amend the AGENTS.md rule. **This needs deciding
-before the read cutover phase, not during it.**
+### D2 — Rewrite `001` or add `002` — ✅ SETTLED
+**`001` has never been applied to any database; it is rewritten in place. There is no `002`.**
+Implemented: `001_initial_core_hr_hierarchy.up.sql` and `.down.sql` now match this document,
+and `backend/test/migrationFoundation.test.js` asserts `migrations.length === 1`.
+
+### D3 — Realtime behavior is lost — ✅ SETTLED (polling)
+**Polling, not WebSockets or SSE.** No schema consequence; recorded here so it is not
+relitigated.
+
+`src/services/firestoreService.js:393` uses `onSnapshot`, so the app is live-updating today:
+approve a leave and every open dashboard reflects it immediately. Under polling it will not.
+
+**This leaves an unresolved conflict with `AGENTS.md` §1**, which states *"During any backend
+or database migration, the existing frontend architecture and UI behavior must stay
+unchanged."* Polling changes perceived UI behavior, so either that rule needs amending or the
+migration knowingly departs from it. The decision is settled; **the rule text has not been
+touched** — see [§9 D20](#d20--agentsmd-1-still-forbids-the-polling-decision).
 
 ### D4 — Where do leave entitlements come from?
 Balances are now computed, but only *usage* is derivable. Entitlement exists nowhere except
@@ -882,4 +891,21 @@ These were flagged in the earlier documents and the settled decisions do not res
 - **A10** — client-exposed actions the server denies. Cutover is the natural time to fix the
   UI, but it is frontend work outside this schema.
 - **A13** — `.down.sql` is unreachable by `migrator.js`. Should the migrator support down
-  migrations, or should the file be deleted as misleading?
+  migrations, or should the file be deleted as misleading? The rewritten `.down.sql` carries a
+  header saying so explicitly, and `backend/test/` asserts it stays symmetric with the up
+  migration, so it cannot silently rot while the question is open.
+
+### D20 — `AGENTS.md` §1 still forbids the polling decision
+D3 settled on polling, but `AGENTS.md` §1 requires UI behavior to stay unchanged during the
+migration, and losing `onSnapshot` changes it. I did not edit `AGENTS.md`: it is the project's
+locked rules file, and amending it was not part of this task. Either it should gain an
+explicit carve-out for realtime during the migration, or the departure should be recorded as a
+knowing exception. **Until then the plan and the rules contradict each other in writing.**
+
+### D21 — `companies_singleton` uses an index on a constant expression
+`CREATE UNIQUE INDEX companies_singleton ON companies ((true))` is the idiom specified in
+§4.1 and is implemented verbatim. It is the one piece of this migration I could not verify,
+because there is no PostgreSQL in this environment. If a real server rejects a constant index
+expression, the guaranteed-portable equivalent is a `singleton boolean NOT NULL DEFAULT true`
+column with `CHECK (singleton)` and `UNIQUE (singleton)`. **Confirm on first real
+`db:migrate`.**

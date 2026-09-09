@@ -38,22 +38,32 @@ existing migration has been modified.
 
 ---
 
-## Phase 0 — Reconcile the schema
+## Phase 0 — Reconcile the schema — ✅ DONE (not yet applied to a database)
 
-**Build.** Bring `001_initial_core_hr_hierarchy.up.sql` in line with
-[schema-design.md](schema-design.md): `full_name` replaces `first_name`/`last_name`, the
-`teams` table and `employees.team_id` are removed in favour of `employees.team_lead_id`,
-compensation columns are added, `companies` gets its singleton index, and the six missing
-tables plus `payroll_tax_for()` are created.
+**Built.** `001_initial_core_hr_hierarchy.up.sql` rewritten in place, with a matching
+`.down.sql`, implementing [schema-design.md](schema-design.md) in full: `full_name` replaces
+`first_name`/`last_name`; the `teams` table and `employees.team_id` are gone in favour of
+`employees.team_lead_id`; compensation columns added; the `companies` singleton index; all six
+missing tables; `payroll_tax_for()`; the generated columns (`leaves.days`, `payroll.gross`,
+`payroll.tax`, `payroll.net`); every `CHECK` constraint; and the `employee_leave_usage` view.
 
-**Depends on.** [D2](schema-design.md#d2--rewrite-001-or-add-002) — rewrite `001` or add
-`002`. Also [D1](schema-design.md#d1--soft-or-hard-delete) (soft vs hard delete), because it
-determines whether the partial unique indexes are required or merely harmless.
+**Depended on.** [D2](schema-design.md#d2--rewrite-001-or-add-002) and
+[D1](schema-design.md#d1--soft-or-hard-delete) — both settled.
 
-**Verified by.** `npm run db:validate`; `npm test` extended to assert every table, enum and
-generated column exists; applying the migration to a scratch database and confirming
-`payroll_tax_for()` reproduces the bracket table at `firestore.rules:549-559` exactly,
-including rounding. **Do not run `db:migrate` against anything but a scratch database.**
+**Verified.** 22 tests in `backend/test/` pass, none of which connect to a database:
+`migrationFoundation.test.js` asserts every table, enum, generated column, named constraint
+and index exists, that `teams`/`first_name`/`last_name` are gone, that every uniqueness rule is
+partial on `deleted_at IS NULL`, and that the down migration reverses everything in a safe
+order. `payrollTax.test.js` proves the bracket table reproduces `firestore.rules:549-559` at
+every boundary using exact integer arithmetic over cents, including the exact-half cases that
+distinguish rounding modes.
+
+**Not yet verified — requires a real server.** No PostgreSQL exists in this environment, so
+the DDL has never been executed. Two things to confirm on first `db:migrate` against a scratch
+database: that the constant-expression index `companies_singleton` is accepted
+([D21](schema-design.md#d21--companies_singleton-uses-an-index-on-a-constant-expression)), and
+that `payroll_tax_for()` returns the tested values under `numeric` arithmetic.
+**Do not run `db:migrate` against anything but a scratch database.**
 
 **Stays on Firebase.** Everything. No user-visible change.
 
@@ -336,18 +346,19 @@ and rehearse it fully on a copy first.
 
 | Decision | Gates | Why it blocks |
 |---|---|---|
-| [D2](schema-design.md#d2--rewrite-001-or-add-002) rewrite `001` vs add `002` | Phase 0 | cannot write the migration without it |
-| [D1](schema-design.md#d1--soft-or-hard-delete) soft vs hard delete | Phase 0 | determines index and FK shape |
+| ~~[D2](schema-design.md#d2--rewrite-001-or-add-002) rewrite `001` vs add `002`~~ | Phase 0 | **settled** — rewritten in place, no `002` |
+| ~~[D1](schema-design.md#d1--soft-or-hard-delete) soft vs hard delete~~ | Phase 0 | **settled** — soft for employees/payroll/leaves, hard elsewhere |
+| ~~[D3](schema-design.md#d3--realtime-behavior-is-lost--settled-polling) realtime loss~~ | Phase 3-4 | **settled** — polling; but see D20 below |
 | [D11](schema-design.md#d11--firebase-auth-passwords-cannot-be-exported) password migration | Phase 4 | user-visible operational event needing scheduling |
 | [D4](schema-design.md#d4--where-do-leave-entitlements-come-from) leave entitlements | Phase 9 | balances are uncomputable without it |
-| [D3](schema-design.md#d3--realtime-behavior-is-lost-and-agentsmd-forbids-that) realtime loss | Phase 3-4 | REST replaces `onSnapshot`; `AGENTS.md` §1 forbids UI behavior change as written |
+| [D20](schema-design.md#d20--agentsmd-1-still-forbids-the-polling-decision) `AGENTS.md` §1 conflict | Phase 3 | the rule still forbids what D3 decided |
 
-**D3 deserves emphasis.** The app is live-updating today: approve a leave and every open
-dashboard reflects it immediately. REST does not do that. `AGENTS.md` §1 requires UI behavior
-to stay unchanged during the migration, so this is a genuine conflict between a settled
-architectural rule and the plan — resolvable by accepting polling, building SSE/WebSockets, or
-amending the rule, but **not by ignoring it.** It should be decided before Phase 3 rather than
-discovered during Phase 4.
+**D3 is settled as polling, but D20 is not.** The app is live-updating today via `onSnapshot`;
+under polling it will not be. `AGENTS.md` §1 requires UI behavior to stay unchanged during the
+migration, so the rules file and this plan now contradict each other in writing. `AGENTS.md`
+has not been edited. Either it gains a carve-out for realtime during the migration, or the
+departure is recorded as a knowing exception — but the contradiction should be closed before
+Phase 3, not carried silently.
 
 The full list of open decisions is
 [schema-design.md §9](schema-design.md#9-decisions-i-need-from-you).
