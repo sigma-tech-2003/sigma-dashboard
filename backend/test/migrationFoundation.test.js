@@ -4,7 +4,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { loadMigrations } from "../src/db/migrator.js";
-import { getEmployeeScope } from "../src/services/employeeScopeService.js";
+
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDirectory = path.join(directory, "..", "src", "db", "migrations");
@@ -15,9 +15,9 @@ const migrationsDirectory = path.join(directory, "..", "src", "db", "migrations"
 
 async function readUpMigration() {
   const migrations = await loadMigrations(migrationsDirectory);
-  assert.equal(migrations.length, 1, "expected exactly one migration; there is no 002");
-  assert.equal(migrations[0].id, "001_initial_core_hr_hierarchy");
-  return migrations[0].sql;
+  const initial = migrations.find((entry) => entry.id === "001_initial_core_hr_hierarchy");
+  assert.ok(initial, "001_initial_core_hr_hierarchy is missing");
+  return initial.sql;
 }
 
 function readDownMigration() {
@@ -322,20 +322,7 @@ test("every table and type created is reversed by the down migration", async () 
   }
 });
 
-test("employee scope foundation models the existing five role boundaries", () => {
-  const base = { employeeId: "employee-id", companyId: "company-id" };
-  assert.deepEqual(getEmployeeScope({ ...base, role: "admin" }), { type: "company" });
-  assert.deepEqual(getEmployeeScope({ ...base, role: "hr" }), { type: "company" });
-  assert.deepEqual(
-    getEmployeeScope({ ...base, role: "manager", departmentId: "department-id" }),
-    { type: "department", departmentId: "department-id" },
-  );
-  assert.deepEqual(
-    getEmployeeScope({ ...base, role: "tl", teamId: "team-id" }),
-    { type: "team", teamId: "team-id" },
-  );
-  assert.deepEqual(getEmployeeScope({ ...base, role: "employee" }), {
-    type: "self",
-    employeeId: "employee-id",
-  });
-});
+// The employee-scope tests that lived here described the Phase 0 placeholder service,
+// which keyed a team on employees.team_id -- a column Phase 0 removed. Phase 1 rewrote
+// that service against schema-design.md section 6; see employeeScope.test.js, which
+// covers every role against every scope.

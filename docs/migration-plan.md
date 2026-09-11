@@ -69,7 +69,31 @@ that `payroll_tax_for()` returns the tested values under `numeric` arithmetic.
 
 ---
 
-## Phase 1 — Backend foundation: identity, principal, scope
+## Phase 1 — Backend foundation: identity, principal, scope — ✅ DONE
+
+**Built.** argon2id password hashing (`src/utils/password.js`); token issuance and
+verification (`src/services/tokenService.js`); the `verifyAccessToken` that
+`middleware/authentication.js` always demanded, now supplied and **mounted** in
+`src/routes/apiRouter.js` behind the public health route; principal resolution in
+`src/repositories/userRepository.js`; `employeeScopeService` rewritten from a descriptor
+generator into a real parameterised `WHERE` builder; the preserved gates and the amended
+deletion authority in `src/services/employeeAuthorizationService.js`; migration
+`002_auth_sessions` for refresh tokens.
+
+**Verified.** 74 tests pass without a database, plus an end-to-end run against
+`sigma_hrm_scratch`: every role's scoped list matched §6 exactly, and a valid unexpired
+token was rejected the instant its account was deactivated.
+
+**Two things fixed in passing.** `employeeRepository.findByUserId` still selected
+`team_id`, a column Phase 0 removed — it would have failed against the real schema. And
+`getEmployeeScope` still keyed a team on `teamId`; it now uses `team_lead_id` per §6.
+
+**Carried forward.** The TL reassignment requirement is enforced in the service layer, not
+by the database: employees are soft-deleted (D1) and `ON DELETE RESTRICT` does not fire on
+an `UPDATE` that sets `deleted_at`. Deleting a team lead with no members returns
+`team_lead_replacement_undecided` pending [D16](schema-design.md#d16--deleting-a-tl-who-has-no-members).
+
+### Original scope (for reference)
 
 **Build.** The parts `backend/src/` currently only gestures at:
 - password hashing and verification (argon2 or bcrypt — new dependency, needs approval)
@@ -83,8 +107,10 @@ that `payroll_tax_for()` returns the tested values under `numeric` arithmetic.
   authority
 
 **Depends on.** Phase 0. [D6](schema-design.md#d6--role-on-users-rather-than-employees) (role
-on `users`), [D10](schema-design.md#d10--session-strategy) (stateless JWT vs refresh tokens),
-[D14](schema-design.md#d14--row-level-security) (RLS or service-layer scoping).
+on `users`), [D10](schema-design.md#d10--session-strategy--settled) — **settled: short JWT +
+refresh table + per-request status check** — and
+[D14](schema-design.md#d14--row-level-security) (RLS or service-layer scoping; still
+service-layer, unchanged).
 
 **Verified by.** Unit tests for the scope predicate covering all five roles; integration tests
 asserting every role × collection × operation cell in

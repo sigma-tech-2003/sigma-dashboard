@@ -827,10 +827,21 @@ a change. If admins must self-approve, this moves to the service layer and weake
 day. Confirm one row per employee per day is correct — the ETL will fail loudly on existing
 duplicates, which is the right way to discover them.
 
-### D10 — Session strategy
-Stateless JWT, or a `refresh_tokens` table with server-side revocation? Revocation matters
-here: deactivating an employee should end their session, and with stateless JWTs it does not
-until expiry. No table is drafted pending this answer.
+### D10 — Session strategy — ✅ SETTLED
+**Short-lived access JWT + a `refresh_tokens` table + a per-request status check.**
+Implemented in Phase 1; the table is migration `002_auth_sessions`.
+
+The reasoning worth preserving: neither a stateless JWT nor a refresh table alone gives
+*immediate* revocation. A JWT is valid until it expires, and revoking refresh tokens only
+stops the next refresh — the access token already issued keeps working. What delivers
+immediacy is the per-request principal query **that §6 already mandates**: because it
+asserts `users.status = 'active'` and both `deleted_at IS NULL`, deactivation takes effect
+on the very next request at no extra cost, since the round trip happens anyway.
+
+The consequence to keep in mind: this forgoes JWT's usual "no database hit" benefit. You
+can have immediate revocation or stateless auth, not both. Access tokens therefore carry
+**only the subject** — role and department are resolved per request, so a role change also
+takes effect immediately rather than at token expiry.
 
 ### D11 — Firebase Auth passwords cannot be exported
 Password hashes are not retrievable from Firebase Auth in a usable form. Every user must
