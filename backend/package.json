@@ -17,10 +17,12 @@
     "db:validate": "node scripts/validate-schema.js"
   },
   "dependencies": {
+    "argon2": "^0.45.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.16.3",
     "zod": "^4.1.5"
   }

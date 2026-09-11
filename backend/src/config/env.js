@@ -28,6 +28,46 @@ export const environment = Object.freeze({
   authTokenAudience: readString(process.env.AUTH_TOKEN_AUDIENCE),
 });
 
+const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+const DEFAULT_REFRESH_TOKEN_TTL_SECONDS = 14 * 24 * 60 * 60;
+const MINIMUM_SECRET_LENGTH = 32;
+
+const parseSeconds = (value, fallback) => {
+  const seconds = Number.parseInt(readString(value), 10);
+  return Number.isInteger(seconds) && seconds > 0 ? seconds : fallback;
+};
+
+/**
+ * Read like getDatabaseConfig: a function rather than a frozen export, so importing this
+ * module never throws. Tests and the syntax check can load the app without a signing key.
+ *
+ * The access token TTL is deliberately short. Under decision D10 a revoked account is
+ * rejected by the per-request principal query, not by token expiry, so a long TTL would
+ * only widen the window in which a stolen token is replayable.
+ */
+export function getAuthConfig() {
+  const secret = readString(process.env.AUTH_TOKEN_SECRET);
+  if (secret.length < MINIMUM_SECRET_LENGTH) {
+    throw new Error(
+      `AUTH_TOKEN_SECRET must be set to at least ${MINIMUM_SECRET_LENGTH} characters before issuing tokens.`,
+    );
+  }
+
+  return Object.freeze({
+    secret,
+    issuer: environment.authTokenIssuer || "sigma-hrm-api",
+    audience: environment.authTokenAudience || "sigma-hrm-web",
+    accessTokenTtlSeconds: parseSeconds(
+      process.env.AUTH_ACCESS_TOKEN_TTL_SECONDS,
+      DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
+    ),
+    refreshTokenTtlSeconds: parseSeconds(
+      process.env.AUTH_REFRESH_TOKEN_TTL_SECONDS,
+      DEFAULT_REFRESH_TOKEN_TTL_SECONDS,
+    ),
+  });
+}
+
 export function getDatabaseConfig() {
   const connectionString = readString(process.env.DATABASE_URL);
   if (!connectionString) {
