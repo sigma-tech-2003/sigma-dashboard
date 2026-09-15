@@ -1,0 +1,92 @@
+{
+  "employees": [
+    {
+      "id": "uid-admin",
+      "data": {
+        "name": "Ayesha Malik", "email": "admin@x.com", "role": "admin", "dept": "Management",
+        "pos": "CEO", "basic": 200000, "allowances": 10000, "joinDate": "2020-01-01",
+        "status": "active", "uid": "uid-admin", "empId": "EMP-001"
+      }
+    },
+    {
+      "id": "uid-tl",
+      "data": {
+        "name": "Bilal Ahmed", "email": "tl@x.com", "role": "tl", "dept": "Engineering",
+        "pos": "Team Lead", "basic": 150000, "allowances": 8000, "joinDate": "2021-01-01",
+        "status": "active", "uid": "uid-tl", "empId": "EMP-002"
+      }
+    },
+    {
+      "id": "uid-emp",
+      "data": {
+        "name": "Sana Riaz", "email": "emp@x.com", "role": "employee", "dept": "Engineering",
+        "pos": "Developer", "basic": 90000, "allowances": 5000, "joinDate": "2022-01-01",
+        "status": "active", "uid": "uid-emp", "teamLeadId": "uid-tl", "empId": "EMP-003"
+      }
+    }
+  ],
+  "departments": [
+    { "id": "d1", "data": { "name": "Management", "status": "Active", "createdAt": "2020-01-01T00:00:00.000Z" } },
+    { "id": "d2", "data": { "name": "Engineering", "status": "Active", "managerId": "uid-tl", "createdAt": "2020-01-01T00:00:00.000Z" } }
+  ],
+  "authLinks": [
+    { "id": "uid-admin", "data": { "employeeId": "uid-admin", "createdAt": "2020-01-01T00:00:00.000Z", "updatedAt": "2020-01-01T00:00:00.000Z" } },
+    { "id": "uid-tl", "data": { "employeeId": "uid-tl", "createdAt": "2020-01-01T00:00:00.000Z", "updatedAt": "2020-01-01T00:00:00.000Z" } },
+    { "id": "uid-emp", "data": { "employeeId": "uid-emp", "createdAt": "2020-01-01T00:00:00.000Z", "updatedAt": "2020-01-01T00:00:00.000Z" } }
+  ],
+  "projects": [
+    {
+      "id": "p1",
+      "data": {
+        "title": "Website Revamp", "description": "Rebuild the marketing site", "department": "Engineering",
+        "teamLeadId": "uid-tl", "assignedEmployeeIds": ["uid-emp"],
+        "startDate": "2025-01-01", "dueDate": "2025-06-01", "status": "active"
+      }
+    }
+  ],
+  "kpis": [
+    {
+      "id": "k1",
+      "data": {
+        "projectId": "p1", "empId": "uid-emp", "title": "On-time delivery",
+        "target": 10, "current": 6, "weight": 50, "period": "Q1",
+        "status": "active", "rating": 8, "ratedBy": "uid-tl", "ratedAt": "2025-03-01T00:00:00.000Z"
+      }
+    }
+  ],
+  "leaves": [
+    {
+      "id": "l1",
+      "data": {
+        "empId": "uid-emp", "type": "Annual", "start": "2025-02-10", "end": "2025-02-12",
+        "days": 3, "reason": "Family trip", "status": "approved", "applied": "2025-02-01"
+      }
+    },
+    {
+      "id": "l2",
+      "data": {
+        "empId": "uid-emp", "type": "Sick", "start": "2025-03-01", "end": "2025-03-01",
+        "days": 1, "reason": "Flu", "status": "pending", "applied": "2025-03-01"
+      }
+    }
+  ],
+  "attendance": [
+    {
+      "id": "a1",
+      "data": {
+        "empId": "uid-emp", "date": "2025-01-05", "status": "present",
+        "checkIn": "09:00", "checkOut": "17:00", "notes": ""
+      }
+    }
+  ],
+  "payroll": [
+    {
+      "id": "pr1",
+      "data": {
+        "empId": "uid-emp", "month": "January", "year": 2025,
+        "basic": 90000, "allowances": 5000, "bonus": 0, "deductions": 1000,
+        "tax": 2250, "net": 91750, "status": "processed"
+      }
+    }
+  ]
+}

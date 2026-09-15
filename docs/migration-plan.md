@@ -122,35 +122,57 @@ is the phase where writing it pays off.
 
 ---
 
-## Phase 2 — ETL: Firestore → Postgres
+## Phase 2 — ETL: Firestore → Postgres — ✅ DONE
 
-**Build.** A one-way, idempotent importer, modelled on the safety rails already proven in
+**Built.** A one-way, idempotent importer, modelled on the safety rails already proven in
 `functions/canonicalRelationshipMigration.js`: dry-run by default, `--apply` requiring an
-explicit project confirmation, refusal to proceed with any unresolved conflict, and a written
-plan before any write ([firebase-inventory.md §6](firebase-inventory.md#6-canonicalrelationshipmigrationjs)).
+explicit database confirmation (the same gate `db:rollback` uses), refusal to proceed with
+any unresolved conflict, and a written plan before any write. `src/services/
+firestoreImportService.js` is the pure planner (no I/O); `src/repositories/
+firestoreImportRepository.js` is the only part that touches Postgres, applying a plan in
+one transaction; `scripts/import-firestore.js` is the CLI. Two new migrations support it —
+`003_leave_decision_provenance` (see [schema-design.md §4.8 Amendment](schema-design.md#amendment-phase-2-migration-003_leave_decision_provenance))
+and `004_firestore_import_bookkeeping` ([D23](schema-design.md#d23--firestore_import_refs-bookkeeping-table)).
 
-Transformations it must perform, each already identified:
+Every transformation identified below is implemented:
 - seed exactly one `companies` row
-- `employees.dept` (a department **name**) → `department_id` uuid
+- `employees.dept` (a department **name**) → `department_id` uuid, case-insensitively
 - `employees.name` → `full_name` (no split needed — that is why the decision matters)
-- split each employee into a `users` row (email, role, status) and an `employees` row
+- split each employee into a `users` row (email, role, status) and an `employees` row —
+  including employees who were never linked to a Firebase Auth account at all, since D11
+  means every account resets its password at cutover regardless
 - `authLinks.employeeId` → `employees.user_id`, enforcing the bijection that
   `canonicalRelationshipMigration.js:356-393` validates at runtime
-- `projects.assignedEmployeeIds[]` → `project_assignments` rows
+- `projects.assignedEmployeeIds[]` → `project_assignments` rows, reconciled to exactly the
+  given set on re-import
 - `departments.status` `'Active'` → `'active'`; `payroll.month` name → `1-12`;
   attendance `""` times → `NULL`
 - resolve the string-vs-integer legacy id tolerance
   ([firebase-inventory.md §4.2](firebase-inventory.md#42-string-vs-integer-id-tolerance)) once
   and for all — Postgres uuids admit no such ambiguity
+- decided leaves with no recorded approver import with their real status and
+  `decision_recorded = false` rather than being discarded or fabricated (D22)
 
-**Depends on.** Phases 0-1. [D17](schema-design.md#d17--employee_number-generation)
-(`employee_number` generation), [D9](schema-design.md#d9--attendance-uniqueness) — the importer
-will **fail loudly on duplicate attendance rows**, which is the intended way to discover them.
+**Depended on.** Phases 0-1. [D17](schema-design.md#d17--employee_number-generation) —
+resolved for the importer's purposes: `employee_number` is preserved verbatim from the
+source `empId`, sidestepping the still-open generation policy for *new* hires, which is a
+Phase 4 concern. [D9](schema-design.md#d9--attendance-uniqueness) — the importer **fails
+loudly on duplicate attendance rows**, exactly as intended.
 
-**Verified by.** Row counts per collection versus per table; referential integrity (zero
-orphaned `employee_id`); recomputing `payroll.tax`/`net` from imported inputs and diffing
-against the Firestore values — **any mismatch here is a pre-existing corrupt row**, exactly
-the class that ambiguity A6 made invisible; re-running the import and asserting zero changes.
+**Verified.** 125 tests pass without a database. Then end-to-end against
+`sigma_hrm_scratch`: dry-run and `--apply` produced identical row counts; the imported
+approved leave landed with `decided_by_employee_id NULL`, `decided_at NULL`,
+`decision_recorded = false`, status preserved as `'approved'`; a *new* row inserted
+directly with `decision_recorded` left at its default `true` and no approver was still
+rejected by `leaves_decision_consistent`, proving the relaxation is scoped to imported rows
+only; re-running the identical import produced zero new rows and the same row ids
+throughout — genuine idempotency, not just the on-paper version in the unit tests.
+
+**Found and fixed during verification, not by inspection**
+([D24](schema-design.md#d24--department-manager-must-work-in-the-department-they-manage--found-and-fixed)):
+the importer let a department manager assigned to the wrong department reach Postgres as an
+uncaught foreign-key crash instead of a clean conflict. Fixed by adding the missing
+cross-reference check before the write is attempted.
 
 **Stays on Firebase.** Everything. Postgres is a shadow copy, read by nothing.
 

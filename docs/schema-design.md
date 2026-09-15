@@ -446,6 +446,47 @@ day count in Postgres, so the expression is exact and immutable.
 Adding it is required to enforce the self-approval ban in the database at all, and is an
 audit improvement.
 
+#### Amendment (Phase 2, migration `003_leave_decision_provenance`)
+
+Phase 2's importer surfaced a gap this section didn't anticipate: `leaves_decision_consistent`
+as written above requires `decided_by_employee_id` and `decided_at` whenever `status <>
+'pending'`, but Firestore's `canUpdateLeave` never recorded either — only `status` itself
+changed. Every already-approved or already-rejected leave in Firestore has no approver and
+no decision timestamp to import.
+
+Per decision, every leave imports with its real status; `decided_by_employee_id` and
+`decided_at` are left `NULL` for pre-cutover decisions rather than fabricated. A new column
+and a widened constraint (added by `003`, not by editing this table's original migration)
+make that representable without weakening the requirement for anything the live app inserts
+going forward:
+
+```sql
+ALTER TABLE leaves ADD COLUMN decision_recorded boolean NOT NULL DEFAULT true;
+
+ALTER TABLE leaves DROP CONSTRAINT leaves_decision_consistent;
+ALTER TABLE leaves ADD CONSTRAINT leaves_decision_consistent CHECK (
+  (status = 'pending' AND decided_by_employee_id IS NULL AND decided_at IS NULL) OR
+  (status <> 'pending' AND decision_recorded
+     AND decided_by_employee_id IS NOT NULL AND decided_at IS NOT NULL) OR
+  (status <> 'pending' AND NOT decision_recorded
+     AND decided_by_employee_id IS NULL AND decided_at IS NULL)
+);
+```
+
+`decision_recorded` names the fact the constraint checks, not when the row arrived — a
+future bulk-import feature unrelated to approvers would otherwise be tempted to reuse a
+more generic `imported_at` for the same purpose. It defaults to `true`, so every row the
+live app ever inserts (Phase 9 onward) keeps the original strict requirement with no
+service-layer workaround needed to compensate for a looser database constraint. Only the
+Firestore importer ever sets it `false`. `leaves_no_self_approval` needed no change — it
+already tolerated a `NULL` approver.
+
+Verified end-to-end against `sigma_hrm_scratch`: an imported approved leave lands with
+`decided_by_employee_id NULL`, `decided_at NULL`, `decision_recorded = false`, `status`
+preserved as `'approved'`; a *new* row inserted directly with `decision_recorded` left at
+its default `true` and no approver is still rejected by the constraint, proving the
+relaxation is scoped to imported rows only.
+
 ### 4.9 `attendance` — from `attendance`
 
 ```sql
@@ -913,10 +954,40 @@ locked rules file, and amending it was not part of this task. Either it should g
 explicit carve-out for realtime during the migration, or the departure should be recorded as a
 knowing exception. **Until then the plan and the rules contradict each other in writing.**
 
-### D21 — `companies_singleton` uses an index on a constant expression
+### D21 — `companies_singleton` uses an index on a constant expression — ✅ VERIFIED
 `CREATE UNIQUE INDEX companies_singleton ON companies ((true))` is the idiom specified in
-§4.1 and is implemented verbatim. It is the one piece of this migration I could not verify,
-because there is no PostgreSQL in this environment. If a real server rejects a constant index
-expression, the guaranteed-portable equivalent is a `singleton boolean NOT NULL DEFAULT true`
-column with `CHECK (singleton)` and `UNIQUE (singleton)`. **Confirm on first real
-`db:migrate`.**
+§4.1 and is implemented verbatim. Verified against a real PostgreSQL 17 server during Phase
+0/1 scratch-database checks: the index is accepted and does enforce the singleton (a second
+insert fails with a unique-violation on `companies_singleton`). No fallback needed.
+
+### D22 — Leave decision provenance — ✅ SETTLED
+`decision_recorded` on `leaves`, added by migration `003_leave_decision_provenance`. See
+§4.8's Amendment above for the full reasoning; recorded here per the numbering convention.
+Verified end-to-end against `sigma_hrm_scratch` in Phase 2.
+
+### D23 — `firestore_import_refs` bookkeeping table
+Migration `004_firestore_import_bookkeeping` adds a table scoped to the importer alone —
+`(source_collection, source_id) -> target_id`, the same role `schema_migrations` plays for
+the migrator. It exists because `projects` and `kpis` have no natural key at all (every
+other imported table already has one: `companies` singleton, `departments` name, `users`
+email, `employees` user_id, `attendance` employee+date, `payroll` employee+period), so a
+second import run would otherwise insert duplicate `projects`/`kpis` rows with no way to
+recognize "this Firestore document was already imported." Does not add any column to
+`projects` or `kpis` themselves and does not touch this document's table definitions for
+them. Verified idempotent end-to-end: re-running the importer against an unchanged dataset
+produced zero new rows anywhere, and the previously-imported project/KPI/leave rows kept
+their exact same ids across both runs.
+
+### D24 — Department manager must work in the department they manage — ✅ FOUND AND FIXED
+Found during Phase 2's real-server verification, not by inspection. The importer's
+`planDepartmentManagers` originally only checked that a department's `managerId` resolved
+to *some* employee — not that the employee's own department matched the department being
+managed. `departments_manager_employee_foreign_key` is composite —
+`(manager_employee_id, id) -> employees(id, department_id)` — precisely to require that a
+department's manager work in that department (§4.11), so a manager assigned to a different
+department reached Postgres as an uncaught foreign-key violation during `--apply` instead of
+a clean, categorized conflict at plan time. Fixed by adding a
+`department-manager-wrong-department` conflict check before the write is attempted, mirroring
+the pattern already used for every other cross-reference check in the importer. This was a
+gap in the importer's validation, not in the schema — the schema's own constraint caught the
+bad data correctly; the importer just didn't catch it first.
