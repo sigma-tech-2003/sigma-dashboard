@@ -562,3 +562,122 @@ test("planning the same dataset twice produces an identical plan", () => {
   assert.deepEqual(first.conflicts, second.conflicts);
   assert.deepEqual(first.totals, second.totals);
 });
+
+// ---------------------------------------------------------------------------
+// --skip-orphans: downgrades missing-employee-reference only, opt-in only
+// ---------------------------------------------------------------------------
+
+/** One resolvable employee (uid-emp, from baseDataset) plus one orphaned reference per collection. */
+function datasetWithOrphans() {
+  return baseDataset({
+    kpis: [{ id: "k1", data: { empId: "GHOST-1", title: "K", target: 10, current: 0, weight: 50, period: "Q1", status: "active" } }],
+    leaves: [{ id: "l1", data: { empId: "GHOST-2", type: "Annual", start: "2025-01-01", end: "2025-01-01", reason: "r", status: "pending", applied: "2025-01-01" } }],
+    attendance: [{ id: "a1", data: { empId: "GHOST-1", date: "2025-01-05", status: "present", checkIn: "09:00", checkOut: "17:00", notes: "" } }],
+    payroll: [{ id: "p1", data: { empId: "GHOST-3", month: "January", year: 2025, basic: 1000, allowances: 0, bonus: 0, deductions: 0, status: "processed" } }],
+  });
+}
+
+test("without --skip-orphans, a missing employee reference blocks in every one of kpis, leaves, attendance and payroll", () => {
+  const plan = planImport(datasetWithOrphans());
+  const categories = conflictCategories(plan);
+  assert.equal(categories.filter((category) => category === "missing-employee-reference").length, 4);
+  assert.equal(plan.steps.kpis.length, 0);
+  assert.equal(plan.steps.leaves.length, 0);
+  assert.equal(plan.steps.attendance.length, 0);
+  assert.equal(plan.steps.payroll.length, 0);
+  assert.equal(plan.skippedOrphans.length, 0);
+  assert.equal(plan.totals.skippedOrphans, 0);
+});
+
+test("skipOrphans defaults to off: passing no options, or options without the key, still blocks", () => {
+  const dataset = datasetWithOrphans();
+  for (const options of [undefined, {}, { companyName: "Acme" }, { skipOrphans: false }, { skipOrphans: undefined }]) {
+    const plan = options === undefined ? planImport(dataset) : planImport(dataset, options);
+    assert.ok(
+      conflictCategories(plan).includes("missing-employee-reference"),
+      `expected blocking with options=${JSON.stringify(options)}`,
+    );
+    assert.equal(plan.skippedOrphans.length, 0);
+  }
+});
+
+test("with skipOrphans: true, all four collections skip instead of blocking, and the rows are omitted", () => {
+  const plan = planImport(datasetWithOrphans(), { skipOrphans: true });
+  assert.equal(conflictCategories(plan).filter((category) => category === "missing-employee-reference").length, 0);
+  assert.equal(plan.steps.kpis.length, 0);
+  assert.equal(plan.steps.leaves.length, 0);
+  assert.equal(plan.steps.attendance.length, 0);
+  assert.equal(plan.steps.payroll.length, 0);
+  assert.equal(plan.skippedOrphans.length, 4);
+  assert.equal(plan.totals.skippedOrphans, 4);
+});
+
+test("the skip report names the collection and the exact missing empId for every skipped record", () => {
+  const plan = planImport(datasetWithOrphans(), { skipOrphans: true });
+  const byCollection = Object.fromEntries(
+    ["kpis", "leaves", "attendance", "payroll"].map((collection) => [
+      collection,
+      plan.skippedOrphans.filter((orphan) => orphan.collection === collection),
+    ]),
+  );
+  assert.equal(byCollection.kpis.length, 1);
+  assert.equal(byCollection.kpis[0].empId, "GHOST-1");
+  assert.equal(byCollection.kpis[0].documentId, "k1");
+  assert.equal(byCollection.leaves[0].empId, "GHOST-2");
+  assert.equal(byCollection.attendance[0].empId, "GHOST-1");
+  assert.equal(byCollection.payroll[0].empId, "GHOST-3");
+
+  // Grouping by empId (what the CLI prints): GHOST-1 appears twice, across two collections.
+  const countsByEmpId = new Map();
+  for (const orphan of plan.skippedOrphans) {
+    countsByEmpId.set(orphan.empId, (countsByEmpId.get(orphan.empId) ?? 0) + 1);
+  }
+  assert.equal(countsByEmpId.size, 3);
+  assert.equal(countsByEmpId.get("GHOST-1"), 2);
+  assert.equal(countsByEmpId.get("GHOST-2"), 1);
+  assert.equal(countsByEmpId.get("GHOST-3"), 1);
+});
+
+test("skipOrphans never applies to an ambiguous employee reference -- it still blocks", () => {
+  // Two employees whose legacy numeric alias both normalize to "3": genuinely ambiguous,
+  // not missing, so which one is meant cannot be guessed regardless of the flag.
+  const dataset = baseDataset({
+    employees: [
+      { id: "legacy-a", data: { ...baseEmployee({ email: "a@x.com", uid: "uid-a" }), id: 3 } },
+      { id: "legacy-b", data: { ...baseEmployee({ email: "b@x.com", uid: "uid-b" }), id: 3 } },
+    ],
+    authLinks: [],
+    kpis: [{ id: "k1", data: { empId: 3, title: "K", target: 10, current: 0, weight: 50, period: "Q1", status: "active" } }],
+  });
+
+  const plan = planImport(dataset, { skipOrphans: true });
+  assert.ok(conflictCategories(plan).includes("ambiguous-employee-reference"));
+  assert.equal(plan.skippedOrphans.length, 0, "an ambiguous reference must never be recorded as a skipped orphan");
+});
+
+test("skipOrphans does not extend to missing-department-reference", () => {
+  const dataset = baseDataset({
+    employees: [{ id: "uid-emp", data: baseEmployee({ dept: "Nonexistent" }) }],
+  });
+  const plan = planImport(dataset, { skipOrphans: true });
+  assert.ok(conflictCategories(plan).includes("missing-department-reference"));
+});
+
+test("skipOrphans does not extend to the authLinks bijection check", () => {
+  const dataset = baseDataset({ authLinks: [] });
+  const plan = planImport(dataset, { skipOrphans: true });
+  assert.ok(conflictCategories(plan).includes("missing-or-conflicting-auth-link"));
+});
+
+test("skipOrphans does not extend to department-manager-wrong-department", () => {
+  const dataset = baseDataset({
+    employees: [{ id: "uid-emp", data: baseEmployee({ dept: "Management", uid: undefined }) }],
+    departments: [
+      { id: "d1", data: { name: "Management", status: "Active" } },
+      { id: "d2", data: { name: "Engineering", status: "Active", managerId: "uid-emp" } },
+    ],
+    authLinks: [],
+  });
+  const plan = planImport(dataset, { skipOrphans: true });
+  assert.deepEqual(conflictCategories(plan), ["department-manager-wrong-department"]);
+});

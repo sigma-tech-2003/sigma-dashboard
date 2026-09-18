@@ -168,6 +168,18 @@ rejected by `leaves_decision_consistent`, proving the relaxation is scoped to im
 only; re-running the identical import produced zero new rows and the same row ids
 throughout — genuine idempotency, not just the on-paper version in the unit tests.
 
+**Run against your real export.** Firestore held 6 employees and 1 department, but 25 of
+the 32 kpi/leave/payroll records referenced 7 distinct employee ids — six legacy numeric
+ids and one newer one — that no longer exist: employees deleted without their dependent
+records being cleaned up alongside them. Per your decision, those records are skipped
+rather than imported with a fabricated employee or left blocking the whole run — a
+genuinely deleted employee has no row to attach them to. `--skip-orphans` (opt-in;
+omitting it leaves `missing-employee-reference` blocking exactly as before) exists
+specifically for this, downgrading only that one conflict category to a reported skip. It
+does not extend to `ambiguous-employee-reference`, `missing-department-reference`, the
+`authLinks` bijection checks, or `department-manager-wrong-department` — all of those still
+block regardless of the flag.
+
 **Found and fixed during verification, not by inspection**
 ([D24](schema-design.md#d24--department-manager-must-work-in-the-department-they-manage--found-and-fixed)):
 the importer let a department manager assigned to the wrong department reach Postgres as an
