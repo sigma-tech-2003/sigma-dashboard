@@ -1,3 +1,8 @@
 node_modules/
 .env
 coverage/
+
+# Firestore exports contain every employee's salary, phone number and other PII.
+# Must never be committed, regardless of what filename or --output path is used.
+/exports/
+*.firestore-export.json
