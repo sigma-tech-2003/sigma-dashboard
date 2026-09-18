@@ -16,7 +16,11 @@
  * source and out of scope to depend on from backend/.
  */
 
-const COLLECTIONS = Object.freeze([
+/**
+ * Exported so scripts/export-firestore.js reads exactly these collections and no others --
+ * one source of truth for "what the importer expects" instead of two lists that could drift.
+ */
+export const COLLECTIONS = Object.freeze([
   "employees", "departments", "authLinks", "projects", "kpis", "leaves", "attendance", "payroll",
 ]);
 
@@ -67,6 +71,11 @@ class ImportPlanBuilder {
   constructor() {
     this.conflicts = [];
     this.advisories = [];
+    this.skippedOrphans = [];
+    // Off by default. Only planImport (from options.skipOrphans) ever sets this to true --
+    // no other code path may flip it, so a missing-employee-reference is a blocking
+    // conflict unless the caller explicitly opted in.
+    this.skipOrphans = false;
     this.steps = { companies: [], departments: [], users: [], employees: [], departmentManagerUpdates: [], projects: [], projectAssignments: [], kpis: [], leaves: [], attendance: [], payroll: [] };
     this.stats = Object.fromEntries(COLLECTIONS.map((name) => [name, { scanned: 0, imported: 0 }]));
   }
@@ -78,6 +87,43 @@ class ImportPlanBuilder {
   addAdvisory(category, collection, documentId, detail) {
     this.advisories.push(Object.freeze({ category, collection, documentId, detail }));
   }
+
+  addSkippedOrphan(collection, documentId, empId) {
+    this.skippedOrphans.push(Object.freeze({ collection, documentId, empId }));
+  }
+}
+
+/**
+ * Resolves the empId reference on a record-level document (kpis/leaves/attendance/
+ * payroll) to the employee's synthetic key, or records why it cannot be used and returns
+ * null so the caller just `continue`s.
+ *
+ * Ambiguous always blocks -- which of several candidates is correct cannot be guessed, so
+ * --skip-orphans never applies to it, regardless of the flag. A genuinely missing
+ * employee (deleted from Firestore, or a malformed reference that never resolves to
+ * anything) blocks UNLESS plan.skipOrphans is set, in which case it is recorded as a
+ * skipped orphan instead of a conflict. This is the only place that distinction is made;
+ * every other conflict category is unaffected by the flag.
+ */
+function resolveRecordEmployeeOrSkip(plan, collection, document, employeeAliasLookup, employeeKeyOf, field = "empId") {
+  const rawValue = document.data[field];
+  const resolution = resolveAlias(employeeAliasLookup, rawValue);
+  if (resolution.status === "resolved" && employeeKeyOf.has(resolution.id)) {
+    return employeeKeyOf.get(resolution.id);
+  }
+
+  if (resolution.status === "ambiguous") {
+    plan.addConflict("ambiguous-employee-reference", collection, document.id, field);
+    return null;
+  }
+
+  if (plan.skipOrphans) {
+    plan.addSkippedOrphan(collection, document.id, rawValue);
+    return null;
+  }
+
+  plan.addConflict("missing-employee-reference", collection, document.id, field);
+  return null;
 }
 
 /** Normalizes one collection's raw array into deduped { id, data } entries. */
@@ -491,14 +537,9 @@ function planKpis(documents, employeeAliasLookup, employeeKeyOf, projectAliasLoo
   const rows = [];
   for (const document of documents) {
     const data = document.data;
-    const employeeResolution = resolveAlias(employeeAliasLookup, data.empId);
-    if (employeeResolution.status !== "resolved" || !employeeKeyOf.has(employeeResolution.id)) {
-      plan.addConflict(
-        employeeResolution.status === "ambiguous" ? "ambiguous-employee-reference" : "missing-employee-reference",
-        "kpis", document.id, "empId",
-      );
-      continue;
-    }
+    const employeeKey = resolveRecordEmployeeOrSkip(plan, "kpis", document, employeeAliasLookup, employeeKeyOf);
+    if (!employeeKey) continue;
+
     let projectKey = null;
     if (!isEmpty(data.projectId)) {
       const resolution = resolveAlias(projectAliasLookup, data.projectId);
@@ -541,7 +582,7 @@ function planKpis(documents, employeeAliasLookup, employeeKeyOf, projectAliasLoo
         continue;
       }
       ratedByEmployeeKey = employeeKeyOf.get(ratedByResolution.id);
-      if (ratedByEmployeeKey === employeeKeyOf.get(employeeResolution.id)) {
+      if (ratedByEmployeeKey === employeeKey) {
         plan.addConflict("kpi-self-rating", "kpis", document.id);
         continue;
       }
@@ -556,7 +597,7 @@ function planKpis(documents, employeeAliasLookup, employeeKeyOf, projectAliasLoo
       key: `kpis:${document.id}`,
       sourceId: document.id,
       bookkeeping: { sourceCollection: "kpis", sourceId: document.id },
-      refs: { employeeKey: employeeKeyOf.get(employeeResolution.id), projectKey, ratedByEmployeeKey },
+      refs: { employeeKey, projectKey, ratedByEmployeeKey },
       fields: {
         title,
         target,
@@ -577,14 +618,9 @@ function planLeaves(documents, employeeAliasLookup, employeeKeyOf, plan) {
 
   for (const document of documents) {
     const data = document.data;
-    const employeeResolution = resolveAlias(employeeAliasLookup, data.empId);
-    if (employeeResolution.status !== "resolved" || !employeeKeyOf.has(employeeResolution.id)) {
-      plan.addConflict(
-        employeeResolution.status === "ambiguous" ? "ambiguous-employee-reference" : "missing-employee-reference",
-        "leaves", document.id, "empId",
-      );
-      continue;
-    }
+    const employeeKey = resolveRecordEmployeeOrSkip(plan, "leaves", document, employeeAliasLookup, employeeKeyOf);
+    if (!employeeKey) continue;
+
     if (!["Annual", "Sick", "Casual", "Maternity", "Emergency"].includes(data.type)) {
       plan.addConflict("invalid-leave-type", "leaves", document.id, "type", String(data.type));
       continue;
@@ -619,7 +655,7 @@ function planLeaves(documents, employeeAliasLookup, employeeKeyOf, plan) {
       key: `leaves:${document.id}`,
       sourceId: document.id,
       bookkeeping: { sourceCollection: "leaves", sourceId: document.id },
-      refs: { employeeKey: employeeKeyOf.get(employeeResolution.id) },
+      refs: { employeeKey },
       fields: {
         type: data.type,
         start_date: data.start,
@@ -643,14 +679,9 @@ function planAttendance(documents, employeeAliasLookup, employeeKeyOf, plan) {
 
   for (const document of documents) {
     const data = document.data;
-    const employeeResolution = resolveAlias(employeeAliasLookup, data.empId);
-    if (employeeResolution.status !== "resolved" || !employeeKeyOf.has(employeeResolution.id)) {
-      plan.addConflict(
-        employeeResolution.status === "ambiguous" ? "ambiguous-employee-reference" : "missing-employee-reference",
-        "attendance", document.id, "empId",
-      );
-      continue;
-    }
+    const employeeKey = resolveRecordEmployeeOrSkip(plan, "attendance", document, employeeAliasLookup, employeeKeyOf);
+    if (!employeeKey) continue;
+
     if (!["present", "absent", "late", "leave"].includes(data.status)) {
       plan.addConflict("invalid-attendance-status", "attendance", document.id, "status", String(data.status));
       continue;
@@ -671,7 +702,6 @@ function planAttendance(documents, employeeAliasLookup, employeeKeyOf, plan) {
       continue;
     }
 
-    const employeeKey = employeeKeyOf.get(employeeResolution.id);
     const dedupeKey = `${employeeKey}|${data.date}`;
     if (seenByEmployeeDate.has(dedupeKey)) {
       plan.addConflict("duplicate-attendance-day", "attendance", document.id, "date", data.date);
@@ -710,14 +740,9 @@ function planPayroll(documents, employeeAliasLookup, employeeKeyOf, plan) {
 
   for (const document of documents) {
     const data = document.data;
-    const employeeResolution = resolveAlias(employeeAliasLookup, data.empId);
-    if (employeeResolution.status !== "resolved" || !employeeKeyOf.has(employeeResolution.id)) {
-      plan.addConflict(
-        employeeResolution.status === "ambiguous" ? "ambiguous-employee-reference" : "missing-employee-reference",
-        "payroll", document.id, "empId",
-      );
-      continue;
-    }
+    const employeeKey = resolveRecordEmployeeOrSkip(plan, "payroll", document, employeeAliasLookup, employeeKeyOf);
+    if (!employeeKey) continue;
+
     const periodMonth = MONTH_TO_NUMBER.get(data.month);
     if (!periodMonth) {
       plan.addConflict("invalid-payroll-month", "payroll", document.id, "month", String(data.month));
@@ -741,7 +766,6 @@ function planPayroll(documents, employeeAliasLookup, employeeKeyOf, plan) {
       continue;
     }
 
-    const employeeKey = employeeKeyOf.get(employeeResolution.id);
     const dedupeKey = `${employeeKey}|${periodYear}-${periodMonth}`;
     if (seenByEmployeePeriod.has(dedupeKey)) {
       plan.addConflict("duplicate-payroll-period", "payroll", document.id, "month");
@@ -788,12 +812,19 @@ function planPayroll(documents, employeeAliasLookup, employeeKeyOf, plan) {
 
 /**
  * @param {object} dataset - see the module docstring for the shape.
- * @param {{ companyName?: string, companyCode?: string }} [options]
+ * @param {{ companyName?: string, companyCode?: string, skipOrphans?: boolean }} [options]
+ *   skipOrphans defaults to false/undefined -- a missing-employee-reference blocks --apply
+ *   unless the caller explicitly opts in. It never affects ambiguous-employee-reference or
+ *   any other conflict category.
  */
 export function planImport(dataset, options = {}) {
   const plan = new ImportPlanBuilder();
   const companyName = options.companyName?.trim() || "Sigma";
   const companyCode = options.companyCode?.trim() || "SIGMA";
+  // Off unless the caller explicitly opts in. See resolveRecordEmployeeOrSkip: this is the
+  // only thing skipOrphans affects. Every other conflict category still blocks --apply
+  // regardless of this flag.
+  plan.skipOrphans = Boolean(options.skipOrphans);
 
   const employeeDocuments = normalizeCollection(dataset, "employees", plan);
   const departmentDocuments = normalizeCollection(dataset, "departments", plan);
@@ -852,11 +883,13 @@ export function planImport(dataset, options = {}) {
     conflicts: plan.conflicts.length,
     advisories: plan.advisories.length,
     leaveDecisionsWithoutApprover: leavesResult.decisionsWithoutApprover,
+    skippedOrphans: plan.skippedOrphans.length,
   };
 
   return Object.freeze({
     conflicts: Object.freeze(plan.conflicts),
     advisories: Object.freeze(plan.advisories),
+    skippedOrphans: Object.freeze(plan.skippedOrphans),
     steps: plan.steps,
     totals: Object.freeze(totals),
   });

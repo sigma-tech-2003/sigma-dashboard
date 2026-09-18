@@ -11,12 +11,22 @@ import { createFirestoreImportRepository } from "../src/repositories/firestoreIm
  *
  * See docs/migration-plan.md Phase 2 for what this does and why, and the module docstring
  * on services/firestoreImportService.js for the exact input shape.
+ *
+ * --skip-orphans downgrades missing-employee-reference (a kpi/leave/attendance/payroll
+ * record whose empId points at an employee no longer in Firestore) from a blocking
+ * conflict to a reported skip. Off by default -- omitting the flag leaves that category
+ * blocking, exactly as before. It has no effect on any other conflict category:
+ * missing-department-reference, the authLinks bijection checks, and
+ * department-manager-wrong-department all still block regardless of this flag.
+ *
+ *   node scripts/import-firestore.js --input=export.json --skip-orphans
  */
 
 function parseArgs(argv) {
-  const flags = { apply: false };
+  const flags = { apply: false, skipOrphans: false };
   for (const argument of argv) {
     if (argument === "--apply") flags.apply = true;
+    else if (argument === "--skip-orphans") flags.skipOrphans = true;
     else if (argument.startsWith("--input=")) flags.input = argument.slice("--input=".length);
     else if (argument.startsWith("--confirm-database=")) flags.confirmDatabase = argument.slice("--confirm-database=".length);
     else if (argument.startsWith("--company-name=")) flags.companyName = argument.slice("--company-name=".length);
@@ -40,6 +50,23 @@ function printSummary(plan) {
     );
   }
 
+  if (plan.skippedOrphans.length > 0) {
+    console.info(`\n${plan.skippedOrphans.length} orphaned record(s) skipped (--skip-orphans): `
+      + "empId points at an employee no longer in Firestore.");
+
+    const byCollection = new Map();
+    const byEmpId = new Map();
+    for (const orphan of plan.skippedOrphans) {
+      byCollection.set(orphan.collection, (byCollection.get(orphan.collection) ?? 0) + 1);
+      const empIdKey = String(orphan.empId);
+      byEmpId.set(empIdKey, (byEmpId.get(empIdKey) ?? 0) + 1);
+    }
+
+    console.info(`  by collection: ${[...byCollection].map(([collection, count]) => `${collection}=${count}`).join(", ")}`);
+    console.info(`  by missing empId (${byEmpId.size} distinct): `
+      + `${[...byEmpId].map(([empId, count]) => `${empId}=${count}`).join(", ")}`);
+  }
+
   if (plan.advisories.length > 0) {
     console.info(`\n${plan.advisories.length} advisory(ies) -- reported, do not block --apply:`);
     for (const advisory of plan.advisories) {
@@ -60,6 +87,12 @@ function printSummary(plan) {
         console.info(`    ${conflict.collection}/${conflict.documentId ?? "?"}${conflict.field ? ` (${conflict.field})` : ""}`);
       }
     }
+    if (byCategory.has("missing-employee-reference")) {
+      console.info(
+        `  (${byCategory.get("missing-employee-reference").length} of these are missing-employee-reference -- `
+        + "re-run with --skip-orphans to skip them instead of blocking.)",
+      );
+    }
   } else {
     console.info("\nNo conflicts.");
   }
@@ -68,7 +101,7 @@ function printSummary(plan) {
 const flags = parseArgs(process.argv.slice(2));
 
 if (!flags.input) {
-  console.error("Usage: node scripts/import-firestore.js --input=<path> [--apply --confirm-database=<name>] [--company-name=] [--company-code=]");
+  console.error("Usage: node scripts/import-firestore.js --input=<path> [--apply --confirm-database=<name>] [--skip-orphans] [--company-name=] [--company-code=]");
   process.exitCode = 1;
 } else if (process.env.NODE_ENV === "production" && flags.apply) {
   console.error("Refusing to apply with NODE_ENV=production.");
@@ -76,7 +109,11 @@ if (!flags.input) {
 } else {
   const raw = await readFile(flags.input, "utf8");
   const dataset = JSON.parse(raw);
-  const plan = planImport(dataset, { companyName: flags.companyName, companyCode: flags.companyCode });
+  const plan = planImport(dataset, {
+    companyName: flags.companyName,
+    companyCode: flags.companyCode,
+    skipOrphans: flags.skipOrphans,
+  });
 
   printSummary(plan);
 
