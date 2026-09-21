@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildEmployeeScopeFilter,
+  buildPayrollScopeFilter,
   getEmployeeScope,
   scopeCoversEmployee,
 } from "../src/services/employeeScopeService.js";
@@ -161,3 +162,38 @@ function evaluateFilterAgainstRow(filter, row) {
   }
   return row.id === filter.values[0];
 }
+
+// ---------------------------------------------------------------------------
+// buildPayrollScopeFilter -- the documented exception to section 6
+// ---------------------------------------------------------------------------
+//
+// Section 6 generalises "leaves, attendance, payroll, kpis: same predicate via join on
+// employee_id", but auth-matrix.md documents Firestore denying manager/tl payroll read
+// unconditionally, and the only two widenings confirmed anywhere (migration-plan.md's
+// Phase 3 note, D19/A8) are projects and KPIs. Payroll follows the stricter rule instead.
+
+test("payroll: admin/hr are unfiltered, manager/tl are denied, employee is self-and-processed-only", () => {
+  assert.equal(buildPayrollScopeFilter(principalFor("admin")).text, "TRUE");
+  assert.equal(buildPayrollScopeFilter(principalFor("hr")).text, "TRUE");
+
+  // The documented exception: unlike every other join-scoped domain, manager and tl get
+  // no row at all for payroll, not a department/team-scoped one.
+  assert.equal(buildPayrollScopeFilter(principalFor("manager")), null);
+  assert.equal(buildPayrollScopeFilter(principalFor("tl")), null);
+
+  const employeeFilter = buildPayrollScopeFilter(principalFor("employee"));
+  assert.match(employeeFilter.text, /payroll\.employee_id = \$1 AND payroll\.status = 'processed'/);
+  assert.deepEqual(employeeFilter.values, [PRINCIPAL_EMPLOYEE]);
+});
+
+test("payroll scope respects a custom alias and startParameterIndex like the employee filter does", () => {
+  const filter = buildPayrollScopeFilter(principalFor("employee"), { alias: "p", startParameterIndex: 4 });
+  assert.match(filter.text, /p\.employee_id = \$4 AND p\.status = 'processed'/);
+  assert.equal(filter.nextParameterIndex, 5);
+});
+
+test("payroll denies the same malformed/unknown principals employee scope denies", () => {
+  for (const principal of [null, undefined, {}, { role: "admin" }, { ...principalFor("admin"), role: "ghost" }]) {
+    assert.equal(buildPayrollScopeFilter(principal), null, JSON.stringify(principal));
+  }
+});

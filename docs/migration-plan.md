@@ -188,6 +188,11 @@ cross-reference check before the write is attempted.
 
 **Stays on Firebase.** Everything. Postgres is a shadow copy, read by nothing.
 
+> **Update (2026-09-21):** there will be no data migration. The HRM was never in production
+> use — the Firestore data is dummy development data — and new data will be created directly
+> in Postgres going forward. The importer above is built and verified (see **Verified**
+> above) but will not be run against real data.
+
 ---
 
 ## Phase 3 — Read-only API and parity harness
@@ -209,6 +214,10 @@ tests.
 > managers and TLs get scoped project and KPI reads directly, where Firestore denies them and
 > routes through `getScopedWorkspace` (ambiguity A8, widening confirmed at
 > [D19](schema-design.md#d19--carried-forward-unresolved-ambiguities)).
+
+> **Update (2026-09-21):** the parity harness (`scripts/parity-harness.js`) is built and
+> ready but will not be run. With no Firestore→Postgres import happening (see the Phase 2
+> update above), there is no shared data between the two systems left to compare.
 
 ---
 
@@ -232,6 +241,10 @@ reset their password at cutover. That is a communicated operational event, not a
 and it needs scheduling before this phase is attempted. Also
 [D16](schema-design.md#d16--deleting-a-tl-who-has-no-members) (TL with no members) and
 [D13](schema-design.md#d13--deletion-authority-managers-deleting-managers).
+
+> **Update (2026-09-21):** D11 is no longer a blocker. There is no data migration — the
+> Firestore data was never real production use, and there are no existing Firebase Auth
+> users whose passwords would need resetting. New accounts are created directly in Postgres.
 
 **Verified by.** A staged rehearsal on a copy: every role logs in, sees the correct scope,
 and the amended deletion authority behaves as specified — including that a TL delete without a
@@ -359,6 +372,11 @@ soak period **before** any deletion.
 **Stays on Firebase.** Nothing. Keep the Firebase project itself in read-only suspension, not
 deleted, until at least one full payroll cycle has run on Postgres.
 
+> **Update (2026-09-21):** since there is no data migration, Firebase can be removed without
+> any data-preservation step — no read-only suspension period, no soak-period access-log
+> check for un-migrated data. The soak period above still applies for verifying the new
+> Postgres-only system is stable before Firebase is deleted, just not for data preservation.
+
 ---
 
 ## Dependency order at a glance
@@ -409,7 +427,7 @@ and rehearse it fully on a copy first.
 | ~~[D2](schema-design.md#d2--rewrite-001-or-add-002) rewrite `001` vs add `002`~~ | Phase 0 | **settled** — rewritten in place, no `002` |
 | ~~[D1](schema-design.md#d1--soft-or-hard-delete) soft vs hard delete~~ | Phase 0 | **settled** — soft for employees/payroll/leaves, hard elsewhere |
 | ~~[D3](schema-design.md#d3--realtime-behavior-is-lost--settled-polling) realtime loss~~ | Phase 3-4 | **settled** — polling; but see D20 below |
-| [D11](schema-design.md#d11--firebase-auth-passwords-cannot-be-exported) password migration | Phase 4 | user-visible operational event needing scheduling |
+| ~~[D11](schema-design.md#d11--firebase-auth-passwords-cannot-be-exported) password migration~~ | Phase 4 | **settled (2026-09-21)** — moot, no data migration, no existing users |
 | [D4](schema-design.md#d4--where-do-leave-entitlements-come-from) leave entitlements | Phase 9 | balances are uncomputable without it |
 | [D20](schema-design.md#d20--agentsmd-1-still-forbids-the-polling-decision) `AGENTS.md` §1 conflict | Phase 3 | the rule still forbids what D3 decided |
 

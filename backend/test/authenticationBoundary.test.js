@@ -47,8 +47,9 @@ test("health is public and answers without credentials", async () => {
 test("routes behind the boundary reject a request with no bearer token", async () => {
   const app = await startApp(async () => PRINCIPAL);
   try {
-    // No authenticated routes exist yet, so an unknown path proves which handler ran:
-    // 401 from the authentication middleware, not 404 from notFound.
+    // The authentication middleware is mounted before every resource route, so a request
+    // with no token 401s before the route (or its repository, which this app has none of
+    // injected) is ever reached.
     const response = await app.get("/api/v1/employees");
     assert.equal(response.status, 401);
     assert.equal(response.body.error.code, "unauthenticated");
