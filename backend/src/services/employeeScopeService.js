@@ -95,6 +95,40 @@ export function buildEmployeeScopeFilter(principal, options = {}) {
 }
 
 /**
+ * Payroll's scope is deliberately NOT buildEmployeeScopeFilter reused via a join. Section 6
+ * generalises "leaves, attendance, payroll, kpis: same predicate via join on employee_id",
+ * but auth-matrix.md documents Firestore denying manager/tl payroll read unconditionally --
+ * no callable route exists for it either, unlike projects/kpis -- and the only two widenings
+ * confirmed anywhere (migration-plan.md's Phase 3 note, D19/A8) are projects and KPIs.
+ * Payroll follows the stricter, actually-confirmed rule instead: this is a documented
+ * exception to section 6's general sentence, not a silent deviation from it.
+ *
+ * admin/hr: unfiltered. employee: own rows, and only status = 'processed' -- Firestore
+ * never let an employee see their own draft payroll either (firestore.rules canReadPayroll).
+ * manager/tl: null (denied), matching auth-matrix.md exactly.
+ *
+ * No join to employees is needed here at all: payroll.employee_id is already a direct
+ * column, and manager/tl never reach a department/team-based branch.
+ */
+export function buildPayrollScopeFilter(principal, options = {}) {
+  const { alias = "payroll", startParameterIndex = 1 } = options;
+  if (!principal?.employeeId || !principal?.role) return null;
+
+  if (COMPANY_WIDE_ROLES.has(principal.role)) {
+    return { text: "TRUE", values: [], nextParameterIndex: startParameterIndex };
+  }
+  if (principal.role === "employee") {
+    return {
+      text: `(${alias}.employee_id = $${startParameterIndex} AND ${alias}.status = 'processed')`,
+      values: [principal.employeeId],
+      nextParameterIndex: startParameterIndex + 1,
+    };
+  }
+  // manager, tl, or anything unrecognised: denied.
+  return null;
+}
+
+/**
  * True when the principal's scope covers the given employee row. The in-memory twin of
  * buildEmployeeScopeFilter, for authorisation decisions about a row already loaded.
  * Both must agree; the tests assert they do for every role.

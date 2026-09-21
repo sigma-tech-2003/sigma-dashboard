@@ -1,6 +1,12 @@
 import { getAuthConfig } from "./config/env.js";
 import { getPool } from "./db/pool.js";
+import { createAttendanceRepository } from "./repositories/attendanceRepository.js";
+import { createDepartmentRepository } from "./repositories/departmentRepository.js";
 import { createEmployeeRepository } from "./repositories/employeeRepository.js";
+import { createKpiRepository } from "./repositories/kpiRepository.js";
+import { createLeaveRepository } from "./repositories/leaveRepository.js";
+import { createPayrollRepository } from "./repositories/payrollRepository.js";
+import { createProjectRepository } from "./repositories/projectRepository.js";
 import { createRefreshTokenRepository } from "./repositories/refreshTokenRepository.js";
 import { createUserRepository } from "./repositories/userRepository.js";
 import { createAuthService } from "./services/authService.js";
@@ -22,6 +28,12 @@ export function getContainer() {
       userRepository,
       refreshTokenRepository,
       employeeRepository: createEmployeeRepository(database),
+      departmentRepository: createDepartmentRepository(database),
+      projectRepository: createProjectRepository(database),
+      kpiRepository: createKpiRepository(database),
+      leaveRepository: createLeaveRepository(database),
+      attendanceRepository: createAttendanceRepository(database),
+      payrollRepository: createPayrollRepository(database),
       authService: createAuthService({
         authConfig: getAuthConfig(),
         userRepository,

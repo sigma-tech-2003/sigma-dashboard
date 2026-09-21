@@ -1,10 +1,27 @@
 import { Router } from "express";
-import { verifyAccessToken } from "../container.js";
+import { getContainer, verifyAccessToken } from "../container.js";
 import { createAuthenticationMiddleware } from "../middleware/authentication.js";
 import { healthRouter } from "./healthRoutes.js";
+import { createResourceRouter } from "./resourceRoutes.js";
+
+// Phase 3: read-only. Every entry becomes a `GET /<path>` and `GET /<path>/:id` pair via
+// createResourceRouter -- see src/controllers/resourceController.js for why one factory
+// serves all seven rather than seven near-identical files. Writes are not part of this
+// phase; they land per domain in Phases 5-9.
+const RESOURCE_ROUTES = [
+  { path: "/employees", repositoryKey: "employeeRepository", resourceName: "employee" },
+  { path: "/departments", repositoryKey: "departmentRepository", resourceName: "department" },
+  { path: "/projects", repositoryKey: "projectRepository", resourceName: "project" },
+  { path: "/kpis", repositoryKey: "kpiRepository", resourceName: "kpi" },
+  { path: "/leaves", repositoryKey: "leaveRepository", resourceName: "leave" },
+  { path: "/attendance", repositoryKey: "attendanceRepository", resourceName: "attendance record" },
+  { path: "/payroll", repositoryKey: "payrollRepository", resourceName: "payroll record" },
+];
 
 /**
- * @param {{ verifyAccessToken?: (token: string) => Promise<object> }} [dependencies]
+ * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object }} [dependencies]
+ *   `repositories` lets tests inject fakes keyed the same as the container
+ *   (employeeRepository, departmentRepository, ...) without a database.
  */
 export function createApiRouter(dependencies = {}) {
   const router = Router();
@@ -20,7 +37,13 @@ export function createApiRouter(dependencies = {}) {
     verifyAccessToken: dependencies.verifyAccessToken ?? verifyAccessToken,
   }));
 
-  // Authenticated routes are added here as each domain cuts over in Phases 5-9.
+  for (const { path, repositoryKey, resourceName } of RESOURCE_ROUTES) {
+    // Deferred: must not call getContainer() while building the router, only when a
+    // request actually arrives, or importing this module would demand a database and
+    // AUTH_TOKEN_SECRET just like verifyAccessToken above is careful to avoid.
+    const getRepository = () => dependencies.repositories?.[repositoryKey] ?? getContainer()[repositoryKey];
+    router.use(path, createResourceRouter(getRepository, { resourceName }));
+  }
 
   return router;
 }
