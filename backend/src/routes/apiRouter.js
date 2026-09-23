@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getContainer, verifyAccessToken } from "../container.js";
 import { createAuthenticationMiddleware } from "../middleware/authentication.js";
+import { createAuthRouter } from "./authRoutes.js";
 import { healthRouter } from "./healthRoutes.js";
 import { createResourceRouter } from "./resourceRoutes.js";
 
@@ -19,9 +20,10 @@ const RESOURCE_ROUTES = [
 ];
 
 /**
- * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object }} [dependencies]
+ * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object }} [dependencies]
  *   `repositories` lets tests inject fakes keyed the same as the container
- *   (employeeRepository, departmentRepository, ...) without a database.
+ *   (employeeRepository, departmentRepository, ...) without a database. `authService` lets
+ *   tests inject a fake/differently-backed auth service for the routes mounted below.
  */
 export function createApiRouter(dependencies = {}) {
   const router = Router();
@@ -29,6 +31,13 @@ export function createApiRouter(dependencies = {}) {
   // Health is deliberately public: it must answer before anyone can authenticate, and a
   // readiness probe has no credentials.
   router.use(healthRouter);
+
+  // Mounted before the authentication middleware: a caller has no bearer token yet when
+  // logging in, and refresh/logout authenticate via their own refresh-token cookie instead
+  // of a bearer token. Resolved per-request via a getter, matching getRepository() below, so
+  // importing this module never opens a pool or demands AUTH_TOKEN_SECRET.
+  const getAuthService = () => dependencies.authService ?? getContainer().authService;
+  router.use("/auth", createAuthRouter(getAuthService));
 
   // Everything mounted after this line requires a bearer token. The middleware sets
   // req.principal, resolved from the database on every request, so a deactivated account

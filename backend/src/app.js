@@ -25,7 +25,11 @@ export function createApp(dependencies = {}) {
     },
     methods: ["GET", "POST", "PATCH", "DELETE"],
     allowedHeaders: ["Authorization", "Content-Type"],
-    credentials: false,
+    // Required for the refresh-token cookie (httpOnly, set by authController.js) to travel
+    // on cross-origin requests at all: without Access-Control-Allow-Credentials, a browser
+    // never sends or exposes it, regardless of anything the frontend or backend do otherwise.
+    // Safe to pair with reflected (never wildcard) origins, which isAllowedOrigin already is.
+    credentials: true,
   }));
   app.use(express.json({ limit: "100kb" }));
   app.use(requestId);
