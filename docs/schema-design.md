@@ -915,10 +915,21 @@ The replacement must come from "that tl's own members". A TL with zero members h
 candidate. Options: allow deletion outright (no one to orphan), allow a replacement from
 outside the team, or block it. Unhandled today.
 
-### D17 — `employee_number` generation
+### D17 — `employee_number` generation — ✅ SETTLED
 Firestore derives `empId` as `EMP-<firebaseUid>` (`employeeInvitationService.js:303-305`).
 Firebase UIDs disappear. Options: a sequence (`EMP-000123`), the Postgres uuid, or
 human-assigned. Existing values must be preserved by the ETL regardless.
+
+Settled on a Postgres sequence, implemented by migration
+`005_employee_number_sequence`: `EMP-` followed by the sequence value, zero-padded to a
+*minimum* of 4 digits (`EMP-0001`, `EMP-9999`, `EMP-10000` — never truncated past whatever
+digits the sequence actually produced, only ever padded up). Not `max(employee_number)+1`:
+`employees_number_unique` (001) is a partial index on `deleted_at IS NULL`, so computing the
+next number from live rows would reissue a soft-deleted employee's number to a new hire, and
+two employees created at once could compute the same next value. A sequence never goes
+backwards and is race-free. Every employee-creating caller — the Phase 4 bootstrap script,
+and later employee-create — draws from the same sequence via `SELECT
+next_employee_number()`.
 
 ### D18 — Triggers for cross-table role invariants
 Three rules cannot be `CHECK` constraints because they span tables or rows: *team lead must
