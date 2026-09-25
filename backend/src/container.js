@@ -10,6 +10,7 @@ import { createProjectRepository } from "./repositories/projectRepository.js";
 import { createRefreshTokenRepository } from "./repositories/refreshTokenRepository.js";
 import { createUserRepository } from "./repositories/userRepository.js";
 import { createAuthService } from "./services/authService.js";
+import { createEmployeeMutationService } from "./services/employeeMutationService.js";
 
 /**
  * Composition root. Built lazily on first use so that importing the app -- for tests, or
@@ -22,12 +23,13 @@ export function getContainer() {
     const database = getPool();
     const userRepository = createUserRepository(database);
     const refreshTokenRepository = createRefreshTokenRepository(database);
+    const employeeRepository = createEmployeeRepository(database);
 
     container = Object.freeze({
       database,
       userRepository,
       refreshTokenRepository,
-      employeeRepository: createEmployeeRepository(database),
+      employeeRepository,
       departmentRepository: createDepartmentRepository(database),
       projectRepository: createProjectRepository(database),
       kpiRepository: createKpiRepository(database),
@@ -39,6 +41,7 @@ export function getContainer() {
         userRepository,
         refreshTokenRepository,
       }),
+      employeeMutationService: createEmployeeMutationService({ employeeRepository }),
     });
   }
   return container;
