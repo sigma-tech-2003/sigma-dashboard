@@ -1,4 +1,5 @@
 import { HttpError } from "../utils/httpError.js";
+import { DEPARTMENT_SCOPED_ROLES, TEAM_SCOPED_ROLES } from "../utils/roles.js";
 import { scopeCoversEmployee } from "./employeeScopeService.js";
 
 /** Only these roles may change basic or allowances. From employeeMutationService.js:35. */
@@ -65,6 +66,40 @@ export function assertCompensationAuthority(principal, target, changes) {
       "compensation_change_denied",
       `Only admin and hr may change ${changed.join(" and ")}.`,
     );
+  }
+}
+
+/**
+ * Creation authority. The Firestore callables had no separate creation gate -- creation was
+ * folded into the invitation flow (employeeInvitationPolicy.js), which reused the same
+ * ROLE_ASSIGNMENTS hierarchy this reuses rather than a distinct one, so nothing new is being
+ * introduced here.
+ *
+ * Department/team scoping mirrors employeeInvitationPolicy.js's `creatorIsScoped` block: a
+ * manager or tl may only create within their own department, and a tl only onto their own
+ * team. `attributes` is expected to already carry the principal's own department_id/
+ * team_lead_id when the caller omitted them (the mutation service's job, not this
+ * function's) -- this only rejects an explicit value that disagrees with that scope, it does
+ * not default anything itself.
+ */
+export function assertCanCreateEmployee(principal, attributes) {
+  assertActingRoleKnown(principal);
+
+  const assignable = ROLE_ASSIGNMENTS[principal.role];
+  if (!assignable.has(attributes.role)) {
+    throw denied("employee_scope_denied", "You cannot create an employee with this role.");
+  }
+
+  if (DEPARTMENT_SCOPED_ROLES.has(principal.role) || TEAM_SCOPED_ROLES.has(principal.role)) {
+    if (attributes.department_id !== principal.departmentId) {
+      throw denied("employee_scope_denied", "You cannot create an employee outside your department.");
+    }
+  }
+
+  if (TEAM_SCOPED_ROLES.has(principal.role)) {
+    if (attributes.team_lead_id !== null && attributes.team_lead_id !== principal.employeeId) {
+      throw denied("employee_scope_denied", "You cannot assign a new employee to another team lead.");
+    }
   }
 }
 
@@ -152,13 +187,11 @@ export function assertCanDeleteEmployee(principal, target, options = {}) {
   const liveMembers = members.filter((member) => member.id !== target.id);
 
   if (liveMembers.length === 0) {
-    // A team lead with no members has nobody to orphan and nobody to promote. Decision
-    // D16 is still open, so this is refused rather than guessed at.
-    throw new HttpError(
-      409,
-      "team_lead_replacement_undecided",
-      "Deleting a team lead with no members is not yet defined (decision D16).",
-    );
+    // Decision D16, settled: a team lead with no members has nobody to orphan and nobody
+    // to promote, so deletion proceeds outright. A replacementTeamLeadId, if one were
+    // supplied anyway, would have no member list to validate against -- there is nothing
+    // left to check.
+    return { replacementTeamLeadId: null, reassignedMemberIds: [] };
   }
 
   if (!replacementTeamLeadId) {

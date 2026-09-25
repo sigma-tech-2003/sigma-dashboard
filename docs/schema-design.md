@@ -718,8 +718,9 @@ Step 2 is what "from that tl's own members" means; step 3 is implied by the prom
 `ON DELETE RESTRICT` in §4.4 is the safety net: if the service ever forgets step, the delete
 fails loudly rather than orphaning rows.
 
-**Edge case with no decided answer:** a TL with zero members has no possible replacement. See
-[§9 D16](#d16--deleting-a-tl-who-has-no-members).
+**Edge case, settled:** a TL with zero members has no possible replacement, so the flow above
+does not run at all in that case — deletion proceeds outright instead. See
+[§9 D16](#d16--deleting-a-tl-who-has-no-members--settled).
 
 ---
 
@@ -910,10 +911,20 @@ The decision covers TLs explicitly. I applied the same rule to `departments.mana
 (`ON DELETE RESTRICT` rather than `001`'s `SET NULL`) on the grounds that a department without
 a manager is the same class of orphan. Confirm, or revert that one to `SET NULL`.
 
-### D16 — Deleting a TL who has no members
+### D16 — Deleting a TL who has no members — ✅ SETTLED
 The replacement must come from "that tl's own members". A TL with zero members has no
-candidate. Options: allow deletion outright (no one to orphan), allow a replacement from
-outside the team, or block it. Unhandled today.
+candidate. Options were: allow deletion outright (no one to orphan), allow a replacement
+from outside the team, or block it.
+
+**Settled: allow deletion outright.** With zero members there is nobody to orphan and
+nobody to promote, so the entire premise of the replacement flow (§6.1) does not apply —
+requiring a `replacementTeamLeadId` here would demand a value that can never be validated
+against anything, and blocking the delete would leave an empty team lead permanently
+undeletable for no protective reason. `assertCanDeleteEmployee`
+(`backend/src/services/employeeAuthorizationService.js`) returns `{ replacementTeamLeadId:
+null, reassignedMemberIds: [] }` immediately once the live member list is empty; a
+`replacementTeamLeadId` supplied anyway is simply ignored rather than validated, since
+there is no member list to validate it against.
 
 ### D17 — `employee_number` generation — ✅ SETTLED
 Firestore derives `empId` as `EMP-<firebaseUid>` (`employeeInvitationService.js:303-305`).

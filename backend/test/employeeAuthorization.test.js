@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   PAYROLL_ROLES,
+  assertCanCreateEmployee,
   assertCanDeleteEmployee,
   assertCanUpdateEmployee,
   assertCompensationAuthority,
@@ -112,6 +113,75 @@ test("submitting compensation fields unchanged is not a compensation change", ()
 });
 
 // ---------------------------------------------------------------------------
+// Creation authority -- reuses ROLE_ASSIGNMENTS, same hierarchy as update
+// ---------------------------------------------------------------------------
+
+test("creation role hierarchy matches ROLE_ASSIGNMENTS", () => {
+  // functions/employeeInvitationPolicy.js:4-10 -- the same ASSIGNABLE_ROLES table update
+  // reuses, not a distinct one.
+  const expectations = [
+    { actor: "admin", target: "admin", allowed: true },
+    { actor: "hr", target: "admin", allowed: false },
+    { actor: "hr", target: "manager", allowed: true },
+    { actor: "manager", target: "tl", allowed: true },
+    { actor: "manager", target: "manager", allowed: false },
+    { actor: "tl", target: "employee", allowed: true },
+    { actor: "tl", target: "tl", allowed: false },
+    { actor: "employee", target: "employee", allowed: false },
+  ];
+
+  for (const { actor, target, allowed } of expectations) {
+    const principal = principalFor(actor);
+    const attributes = { role: target, department_id: DEPARTMENT, team_lead_id: null };
+    const code = codeOf(() => assertCanCreateEmployee(principal, attributes));
+    assert.equal(code, allowed ? null : "employee_scope_denied", `${actor} creating ${target}`);
+  }
+});
+
+test("a manager may only create within their own department", () => {
+  const principal = principalFor("manager");
+  assert.doesNotThrow(() => assertCanCreateEmployee(principal, {
+    role: "employee", department_id: DEPARTMENT, team_lead_id: null,
+  }));
+  assert.equal(
+    codeOf(() => assertCanCreateEmployee(principal, {
+      role: "employee", department_id: OTHER_DEPARTMENT, team_lead_id: null,
+    })),
+    "employee_scope_denied",
+  );
+});
+
+test("a tl may only create within their own department, onto their own team", () => {
+  const principal = principalFor("tl");
+  assert.doesNotThrow(() => assertCanCreateEmployee(principal, {
+    role: "employee", department_id: DEPARTMENT, team_lead_id: SELF,
+  }));
+  assert.equal(
+    codeOf(() => assertCanCreateEmployee(principal, {
+      role: "employee", department_id: OTHER_DEPARTMENT, team_lead_id: SELF,
+    })),
+    "employee_scope_denied",
+    "outside their department",
+  );
+  assert.equal(
+    codeOf(() => assertCanCreateEmployee(principal, {
+      role: "employee", department_id: DEPARTMENT, team_lead_id: "other-tl",
+    })),
+    "employee_scope_denied",
+    "onto another team lead's team",
+  );
+});
+
+test("admin and hr may create in any department, with any team lead", () => {
+  for (const actor of ["admin", "hr"]) {
+    const principal = principalFor(actor);
+    assert.doesNotThrow(() => assertCanCreateEmployee(principal, {
+      role: "employee", department_id: OTHER_DEPARTMENT, team_lead_id: "any-tl",
+    }));
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Deletion authority -- DELIBERATELY different from auth-matrix.md
 // ---------------------------------------------------------------------------
 
@@ -216,15 +286,25 @@ test("a valid replacement returns the remaining members to reassign", () => {
   assert.deepEqual(result.reassignedMemberIds.sort(), ["m-2", "m-3"]);
 });
 
-test("deleting a team lead with no members is refused pending decision D16", () => {
-  // Reported rather than guessed: there is no member to promote, and whether that should
-  // permit deletion outright is undecided.
+test("decision D16, settled: deleting a team lead with no members is allowed outright", () => {
+  // Nobody to orphan, nobody to promote -- no replacement is required or even usable.
   const principal = principalFor("manager");
   const target = employee({ id: "tl-1", role: "tl" });
-  assert.equal(
-    codeOf(() => assertCanDeleteEmployee(principal, target, { members: [] })),
-    "team_lead_replacement_undecided",
-  );
+
+  const result = assertCanDeleteEmployee(principal, target, { members: [] });
+  assert.deepEqual(result, { replacementTeamLeadId: null, reassignedMemberIds: [] });
+});
+
+test("decision D16: a replacementTeamLeadId supplied for a memberless team lead is simply ignored", () => {
+  // There is no member list to validate it against, so it is neither required nor checked.
+  const principal = principalFor("manager");
+  const target = employee({ id: "tl-1", role: "tl" });
+
+  const result = assertCanDeleteEmployee(principal, target, {
+    members: [],
+    replacementTeamLeadId: "someone-not-a-member",
+  });
+  assert.deepEqual(result, { replacementTeamLeadId: null, reassignedMemberIds: [] });
 });
 
 // ---------------------------------------------------------------------------
