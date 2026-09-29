@@ -65,5 +65,14 @@ export function createUserRepository(database) {
     async touchLastLogin(userId) {
       await database.query("UPDATE users SET last_login_at = now() WHERE id = $1", [userId]);
     },
+
+    /** Used by passwordSetService to check an account is still 'invited' before minting a token. */
+    async findById(userId) {
+      const { rows } = await database.query(
+        "SELECT id, email, role, status FROM users WHERE id = $1 AND deleted_at IS NULL",
+        [userId],
+      );
+      return rows[0] || null;
+    },
   });
 }

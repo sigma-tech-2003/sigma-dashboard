@@ -17,6 +17,7 @@ export function createEmployeeRouter(getEmployeeMutationService) {
   router.post("/", controller.create);
   router.patch("/:id", controller.update);
   router.delete("/:id", controller.remove);
+  router.post("/:id/password-token", controller.issuePasswordToken);
 
   return router;
 }

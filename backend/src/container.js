@@ -7,10 +7,12 @@ import { createKpiRepository } from "./repositories/kpiRepository.js";
 import { createLeaveRepository } from "./repositories/leaveRepository.js";
 import { createPayrollRepository } from "./repositories/payrollRepository.js";
 import { createProjectRepository } from "./repositories/projectRepository.js";
+import { createPasswordSetTokenRepository } from "./repositories/passwordSetTokenRepository.js";
 import { createRefreshTokenRepository } from "./repositories/refreshTokenRepository.js";
 import { createUserRepository } from "./repositories/userRepository.js";
 import { createAuthService } from "./services/authService.js";
 import { createEmployeeMutationService } from "./services/employeeMutationService.js";
+import { createPasswordSetService } from "./services/passwordSetService.js";
 
 /**
  * Composition root. Built lazily on first use so that importing the app -- for tests, or
@@ -21,15 +23,23 @@ let container;
 export function getContainer() {
   if (!container) {
     const database = getPool();
+    const authConfig = getAuthConfig();
     const userRepository = createUserRepository(database);
     const refreshTokenRepository = createRefreshTokenRepository(database);
     const employeeRepository = createEmployeeRepository(database);
+    const passwordSetTokenRepository = createPasswordSetTokenRepository(database);
+    const passwordSetService = createPasswordSetService({
+      passwordSetTokenRepository,
+      userRepository,
+      passwordSetTokenTtlSeconds: authConfig.passwordSetTokenTtlSeconds,
+    });
 
     container = Object.freeze({
       database,
       userRepository,
       refreshTokenRepository,
       employeeRepository,
+      passwordSetTokenRepository,
       departmentRepository: createDepartmentRepository(database),
       projectRepository: createProjectRepository(database),
       kpiRepository: createKpiRepository(database),
@@ -37,11 +47,12 @@ export function getContainer() {
       attendanceRepository: createAttendanceRepository(database),
       payrollRepository: createPayrollRepository(database),
       authService: createAuthService({
-        authConfig: getAuthConfig(),
+        authConfig,
         userRepository,
         refreshTokenRepository,
       }),
-      employeeMutationService: createEmployeeMutationService({ employeeRepository }),
+      passwordSetService,
+      employeeMutationService: createEmployeeMutationService({ employeeRepository, passwordSetService }),
     });
   }
   return container;

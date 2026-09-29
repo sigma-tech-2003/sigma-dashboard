@@ -1,4 +1,6 @@
 import { environment } from "../config/env.js";
+import { setPasswordSchema } from "../validation/passwordSetSchemas.js";
+import { HttpError } from "../utils/httpError.js";
 
 /**
  * Every decision here is about *transport*, not authentication -- the actual login/refresh/
@@ -50,7 +52,7 @@ function readRefreshTokenCookie(req) {
   return null;
 }
 
-export function createAuthController(getAuthService) {
+export function createAuthController({ getAuthService, getPasswordSetService }) {
   return {
     async login(req, res, next) {
       try {
@@ -93,6 +95,29 @@ export function createAuthController(getAuthService) {
         await authService.logout({ refreshToken });
 
         res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, refreshTokenCookieOptions());
+        res.status(204).end();
+      } catch (error) {
+        next(error);
+      }
+    },
+
+    /**
+     * Public: completes an invited employee's onboarding. The token proves identity by
+     * itself here -- there is no bearer token yet, which is why this sits before the
+     * authentication middleware alongside login/refresh/logout rather than under
+     * /employees. A malformed body (missing token/password, password too short) is a 400;
+     * an unknown, expired, or already-used token is a 400 with the SAME generic message --
+     * passwordSetService.redeemToken already guarantees that, this just doesn't add a
+     * second, better-informed error path that could leak which one applied.
+     */
+    async setPassword(req, res, next) {
+      try {
+        const parsed = setPasswordSchema.safeParse(req.body);
+        if (!parsed.success) {
+          throw new HttpError(400, "invalid_request", "A token and a password (at least 8 characters) are required.");
+        }
+
+        await getPasswordSetService().redeemToken(parsed.data.token, parsed.data.password);
         res.status(204).end();
       } catch (error) {
         next(error);

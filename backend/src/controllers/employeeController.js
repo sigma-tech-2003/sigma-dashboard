@@ -60,5 +60,24 @@ export function createEmployeeController(getEmployeeMutationService) {
         next(error);
       }
     },
+
+    /**
+     * Admin/hr only -- enforced in passwordSetService, not here (see its module docstring
+     * for why this is deliberately narrower than "whoever may update this employee").
+     * Returns the raw token exactly once; it is never retrievable again. See
+     * docs/schema-design.md's decision entry for why it is returned here rather than
+     * emailed, and that this is an interim mechanism.
+     */
+    async issuePasswordToken(req, res, next) {
+      try {
+        const { success: idOk, data: id } = uuidSchema.safeParse(req.params.id);
+        if (!idOk) throw notFound();
+
+        const { token, expiresAt } = await getEmployeeMutationService().issuePasswordSetToken(req.principal, id);
+        res.status(201).json({ data: { token, expiresAt } });
+      } catch (error) {
+        next(error);
+      }
+    },
   });
 }

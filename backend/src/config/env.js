@@ -30,6 +30,10 @@ export const environment = Object.freeze({
 
 const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 const DEFAULT_REFRESH_TOKEN_TTL_SECONDS = 14 * 24 * 60 * 60;
+// 24 hours: long enough for an admin/hr to relay the token to the employee out of band
+// (there is no email sending in this system -- see docs/schema-design.md's decision entry),
+// short enough that a token sitting in a chat message or printed sheet isn't a standing risk.
+const DEFAULT_PASSWORD_SET_TOKEN_TTL_SECONDS = 24 * 60 * 60;
 const MINIMUM_SECRET_LENGTH = 32;
 
 const parseSeconds = (value, fallback) => {
@@ -64,6 +68,10 @@ export function getAuthConfig() {
     refreshTokenTtlSeconds: parseSeconds(
       process.env.AUTH_REFRESH_TOKEN_TTL_SECONDS,
       DEFAULT_REFRESH_TOKEN_TTL_SECONDS,
+    ),
+    passwordSetTokenTtlSeconds: parseSeconds(
+      process.env.PASSWORD_SET_TOKEN_TTL_SECONDS,
+      DEFAULT_PASSWORD_SET_TOKEN_TTL_SECONDS,
     ),
   });
 }

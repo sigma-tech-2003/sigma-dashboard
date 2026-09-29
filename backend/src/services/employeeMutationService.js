@@ -44,7 +44,7 @@ async function assertValidTeamLead(employeeRepository, teamLeadId, departmentId)
   }
 }
 
-export function createEmployeeMutationService({ employeeRepository }) {
+export function createEmployeeMutationService({ employeeRepository, passwordSetService }) {
   /**
    * A manager/tl creating an employee defaults department_id (and, for a tl, team_lead_id)
    * to their own scope when omitted -- employeeInvitationPolicy.js's `creatorIsScoped`
@@ -125,6 +125,19 @@ export function createEmployeeMutationService({ employeeRepository }) {
       });
 
       await employeeRepository.deleteById(employeeId, { replacementTeamLeadId, reassignedMemberIds });
+    },
+
+    /**
+     * Bridges employeeId -> user_id and hands off to passwordSetService, which knows
+     * nothing about employees at all -- it only ever deals in users. Authorization
+     * (admin/hr only, deliberately narrower than "whoever may update this employee") and
+     * the invited-status check both live in passwordSetService, not here.
+     */
+    async issuePasswordSetToken(principal, employeeId) {
+      const target = await employeeRepository.findById(employeeId);
+      if (!target) throw new HttpError(404, "not_found", "Employee not found.");
+
+      return passwordSetService.issueTokenForUser(principal, target.user_id);
     },
   });
 }

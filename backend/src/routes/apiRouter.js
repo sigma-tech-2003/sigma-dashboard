@@ -23,11 +23,11 @@ const RESOURCE_ROUTES = [
 ];
 
 /**
- * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object, employeeMutationService?: object }} [dependencies]
+ * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object, employeeMutationService?: object, passwordSetService?: object }} [dependencies]
  *   `repositories` lets tests inject fakes keyed the same as the container
- *   (employeeRepository, departmentRepository, ...) without a database. `authService` and
- *   `employeeMutationService` let tests inject fake/differently-backed services for the
- *   routes mounted below.
+ *   (employeeRepository, departmentRepository, ...) without a database. `authService`,
+ *   `employeeMutationService` and `passwordSetService` let tests inject fake/differently-
+ *   backed services for the routes mounted below.
  */
 export function createApiRouter(dependencies = {}) {
   const router = Router();
@@ -37,11 +37,12 @@ export function createApiRouter(dependencies = {}) {
   router.use(healthRouter);
 
   // Mounted before the authentication middleware: a caller has no bearer token yet when
-  // logging in, and refresh/logout authenticate via their own refresh-token cookie instead
-  // of a bearer token. Resolved per-request via a getter, matching getRepository() below, so
-  // importing this module never opens a pool or demands AUTH_TOKEN_SECRET.
+  // logging in, and refresh/logout/set-password authenticate via their own token/cookie
+  // instead of a bearer token. Resolved per-request via a getter, matching getRepository()
+  // below, so importing this module never opens a pool or demands AUTH_TOKEN_SECRET.
   const getAuthService = () => dependencies.authService ?? getContainer().authService;
-  router.use("/auth", createAuthRouter(getAuthService));
+  const getPasswordSetService = () => dependencies.passwordSetService ?? getContainer().passwordSetService;
+  router.use("/auth", createAuthRouter({ getAuthService, getPasswordSetService }));
 
   // Everything mounted after this line requires a bearer token. The middleware sets
   // req.principal, resolved from the database on every request, so a deactivated account
