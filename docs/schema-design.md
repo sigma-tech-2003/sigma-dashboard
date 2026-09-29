@@ -1013,3 +1013,60 @@ a clean, categorized conflict at plan time. Fixed by adding a
 the pattern already used for every other cross-reference check in the importer. This was a
 gap in the importer's validation, not in the schema — the schema's own constraint caught the
 bad data correctly; the importer just didn't catch it first.
+
+### D25 — Set-password token delivery for invited employees — ✅ SETTLED (interim)
+
+Employee-create (Phase 4 Part B) leaves `users.status = 'invited'` with no `password_hash` —
+there was no way for that account to ever become usable. Phase 4 Part C closes that gap with
+a single-use, expiring token: migration `006_password_set_tokens` adds a dedicated
+`password_set_tokens` table (`user_id`, `token_hash`, `expires_at`, `used_at`, `revoked_at`),
+hashed with SHA-256 exactly the way `refresh_tokens` is, for the same reason — a high-entropy
+random value isn't brute-forceable the way a password is, so a fast digest is enough and
+keeps redemption a single indexed lookup.
+
+**Deliberately not `refresh_tokens`.** A different lifecycle (single-use, never rotated,
+revoked wholesale on reissue rather than individually) and a different audience (an
+unauthenticated person redeeming an invite, not an already-logged-in session). Folding it
+into `refresh_tokens` would have meant a table whose columns mean two different things
+depending on which kind of row you're looking at.
+
+**How the token reaches the employee: it is returned in the API response to the admin/hr who
+issues it, and nowhere else.** There is no email-sending infrastructure in this system, and
+no frontend route yet that could meaningfully receive a link (the React app does not call
+this API at all — `migration-plan.md`; `AGENTS.md` §1 keeps frontend behavior frozen during
+the migration). Returning the bare token to an already-authenticated admin/hr, for them to
+relay out of band (Slack, a phone call, an offer letter), is the only option that doesn't
+assume delivery infrastructure that doesn't exist. It is shown exactly once, at issuance;
+losing it before relaying it means issuing a new one, not retrieving the old one.
+
+**One live token per user.** Issuing a new token revokes any still-outstanding one for that
+user first, in the same transaction — mirrors how login already rotates refresh tokens
+rather than letting old ones accumulate, and means a lost-then-reissued token can't be
+resurrected later by whoever it was leaked to.
+
+**TTL: 24 hours**, `PASSWORD_SET_TOKEN_TTL_SECONDS` (default `86400`, same override pattern
+as the access/refresh TTLs in `config/env.js`). Long enough for a human to relay it out of
+band, short enough that a token sitting in a chat message or on a printed sheet isn't a
+standing risk.
+
+**Redemption**, all in one transaction: sets `password_hash` and flips `users.status` to
+`'active'`, marks the token used, and **revokes every outstanding refresh token for that
+user** — if an invited account somehow already had a live session, setting a password ends
+it rather than leaving it running alongside the new credential. An unknown, expired, or
+already-used token all produce the identical generic error; the endpoint never confirms
+whether a token exists, matching how login already never reveals whether an email is
+registered.
+
+**Issuance is admin/hr only — not "whoever may update this employee."** A manager or tl can
+edit an employee's phone number under Phase 4 Part B's authorization rules, but minting a
+working login credential is a materially larger power, and nothing in `auth-matrix.md`
+grants it to either role. Enforced in `passwordSetService`, independently of
+`employeeAuthorizationService`'s update/delete gates.
+
+**This is explicitly an interim mechanism, not a design to build on.** It exists because
+there is currently no email infrastructure and no frontend route to hand a link to. Once
+either exists, the right shape is almost certainly a link (not a bare token read off an API
+response) delivered by an actual email send, and this decision should be revisited rather
+than assumed permanent. A future reader finding this code should not conclude that returning
+raw credentials in API responses is this codebase's general pattern — it is a deliberate,
+narrow exception made for exactly one flow, for exactly this reason.
