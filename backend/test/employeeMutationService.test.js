@@ -16,9 +16,20 @@ const principalFor = (role, overrides = {}) => ({
 });
 
 const employee = (overrides = {}) => ({
-  id: "target-id", role: "employee", department_id: DEPARTMENT, team_lead_id: null,
-  basic: 50000, allowances: 0, ...overrides,
+  id: "target-id", user_id: "target-user-id", role: "employee", department_id: DEPARTMENT,
+  team_lead_id: null, basic: 50000, allowances: 0, ...overrides,
 });
+
+function fakePasswordSetService(issueResult) {
+  const calls = { issueTokenForUser: [] };
+  return {
+    calls,
+    async issueTokenForUser(principal, userId) {
+      calls.issueTokenForUser.push({ principal, userId });
+      return issueResult ?? { token: "raw-token", expiresAt: new Date() };
+    },
+  };
+}
 
 function fakeEmployeeRepository(seedEmployees = []) {
   const byId = new Map(seedEmployees.map((row) => [row.id, row]));
@@ -262,4 +273,34 @@ test("deleteEmployee: decision D16 -- a tl with zero members is deleted outright
 
   assert.equal(repository.calls.findTeamMembers.length, 1);
   assert.deepEqual(repository.calls.deleteById[0].options, { replacementTeamLeadId: null, reassignedMemberIds: [] });
+});
+
+// ---------------------------------------------------------------------------
+// issuePasswordSetToken: pure employeeId -> user_id bridging; authorization and the
+// invited-status check both live in passwordSetService, exercised in
+// passwordSetService.test.js, not re-derived here.
+// ---------------------------------------------------------------------------
+
+test("issuePasswordSetToken: resolves the employee's user_id and delegates to passwordSetService", async () => {
+  const repository = fakeEmployeeRepository([employee({ id: "target-id", user_id: "target-user-id" })]);
+  const passwordSetService = fakePasswordSetService({ token: "abc123", expiresAt: new Date("2026-10-01") });
+  const service = createEmployeeMutationService({ employeeRepository: repository, passwordSetService });
+
+  const principal = principalFor("admin");
+  const result = await service.issuePasswordSetToken(principal, "target-id");
+
+  assert.deepEqual(passwordSetService.calls.issueTokenForUser[0], { principal, userId: "target-user-id" });
+  assert.deepEqual(result, { token: "abc123", expiresAt: new Date("2026-10-01") });
+});
+
+test("issuePasswordSetToken: a nonexistent employee is a 404, and passwordSetService is never reached", async () => {
+  const repository = fakeEmployeeRepository([]);
+  const passwordSetService = fakePasswordSetService();
+  const service = createEmployeeMutationService({ employeeRepository: repository, passwordSetService });
+
+  await assert.rejects(
+    service.issuePasswordSetToken(principalFor("admin"), "missing-id"),
+    (error) => { assert.equal(error.statusCode, 404); return true; },
+  );
+  assert.equal(passwordSetService.calls.issueTokenForUser.length, 0);
 });
