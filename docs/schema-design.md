@@ -501,6 +501,9 @@ CREATE TABLE attendance (
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now(),
   deleted_at  timestamptz,
+  -- Who soft-deleted the row (D27). Added by migration 007, not 001; ON DELETE SET NULL so
+  -- an audit pointer never blocks hard-deleting an employee.
+  deleted_by_employee_id uuid REFERENCES employees(id) ON DELETE SET NULL,
 
   CONSTRAINT attendance_times_ordered
     CHECK (check_in IS NULL OR check_out IS NULL OR check_out > check_in),
@@ -509,12 +512,19 @@ CREATE TABLE attendance (
   CONSTRAINT attendance_absent_has_no_times
     CHECK (status NOT IN ('absent','leave') OR (check_in IS NULL AND check_out IS NULL)),
 
-  CONSTRAINT attendance_timestamps_ordered CHECK (updated_at >= created_at)
+  CONSTRAINT attendance_timestamps_ordered CHECK (updated_at >= created_at),
+
+  -- A deleter may only be recorded on a row that is actually deleted (007).
+  CONSTRAINT attendance_deleted_by_requires_deleted_at
+    CHECK (deleted_by_employee_id IS NULL OR deleted_at IS NOT NULL)
 );
 
 CREATE UNIQUE INDEX attendance_employee_date_unique
   ON attendance (employee_id, work_date) WHERE deleted_at IS NULL;
 CREATE INDEX attendance_date_index ON attendance (work_date) WHERE deleted_at IS NULL;
+-- Serves the ON DELETE SET NULL scan above (007).
+CREATE INDEX attendance_deleted_by_index
+  ON attendance (deleted_by_employee_id) WHERE deleted_by_employee_id IS NOT NULL;
 ```
 
 Firestore's `checkIn`/`checkOut` are `HH:MM` strings or `""` (`isValidAttendanceTime`,
@@ -522,7 +532,12 @@ Firestore's `checkIn`/`checkOut` are `HH:MM` strings or `""` (`isValidAttendance
 disappears; the ETL maps `""` → `NULL`.
 
 `attendance_employee_date_unique` is **new** — Firestore permits unlimited duplicate rows for
-the same employee and day. See [§9 D9](#d9--attendance-uniqueness).
+the same employee and day. See [§9 D9](#d9--attendance-uniqueness--settled).
+
+`attendance` is soft-deleted, and the delete records who did it in `deleted_by_employee_id`;
+the block above shows the table as it stands after migration `007`, which added that column,
+its `CHECK` and its index to the `001` definition. See the second correction under
+[D1](#d1--soft-or-hard-delete--settled) and [D27](#d27--attendance-write-rules--settled).
 
 **The "date not in the future" check is deliberately absent here** — see §5.
 
@@ -832,6 +847,14 @@ obligation**, with the foreign key as a backstop for any code path that does har
 > and [D26](#d26--deleting-a-department-that-still-has-employees-in-it--settled), both of
 > which are service-layer obligations for exactly this reason, not database guarantees.
 
+> **Second correction:** `attendance` is likewise soft-deleted in practice, exactly as
+> `departments` is. It has a `deleted_at` column, `attendance_employee_date_unique` is a
+> partial index on `deleted_at IS NULL`, and `attendanceRepository.js` filters every query on
+> `attendance.deleted_at IS NULL`, so "hard delete everywhere else" is stale for this table
+> too. The "`ON DELETE RESTRICT` does not fire on a soft delete" point applies to
+> `attendance.employee_id` as well. The delete path also records *who* deleted the row — see
+> [D27](#d27--attendance-write-rules--settled).
+
 ### D2 — Rewrite `001` or add `002` — ✅ SETTLED
 **`001` has never been applied to any database; it is rewritten in place. There is no `002`.**
 Implemented: `001_initial_core_hr_hierarchy.up.sql` and `.down.sql` now match this document,
@@ -878,10 +901,20 @@ are not blocked. `leaves_no_self_approval` blocks everyone, because a `CHECK` ca
 approver's role. Confirm the broader rule is acceptable — I believe it is desirable, but it is
 a change. If admins must self-approve, this moves to the service layer and weakens.
 
-### D9 — Attendance uniqueness
+### D9 — Attendance uniqueness — ✅ SETTLED
 `attendance_employee_date_unique` is new; Firestore allows unlimited rows per employee per
 day. Confirm one row per employee per day is correct — the ETL will fail loudly on existing
 duplicates, which is the right way to discover them.
+
+**Settled: one row per employee per day, rejected rather than merged.** `POST` of a second
+record for an employee and day that already has a live one returns
+`409 attendance_already_recorded`, and the error carries the existing record's id so the
+caller can `PATCH` it instead. A `PATCH` that moves a record onto an occupied employee and day
+gets the same 409 (mapped from `23505` on `attendance_employee_date_unique`). Rejected
+alternatives: upsert-on-`POST` (silently overwrites, hides accidental double-marks, blurs
+create versus correct) and several rows per day (contradicts the index and would need a
+migration). Because the index is partial on `deleted_at IS NULL`, a soft-deleted record does
+not block re-marking that day. See [D27](#d27--attendance-write-rules--settled).
 
 ### D10 — Session strategy — ✅ SETTLED
 **Short-lived access JWT + a `refresh_tokens` table + a per-request status check.**
@@ -1130,3 +1163,63 @@ Like D15, this is a service-layer obligation, not a database guarantee:
 but `departments` is soft-deleted in practice (see the correction after D1), so the live-
 employee count check above is the only thing actually preventing a department from vanishing
 while its employees still silently point at it.
+
+### D27 — Attendance write rules — ✅ SETTLED
+
+Decided before Phase 6 implementation. Everything here is a service-layer or API-layer rule
+unless it says otherwise; §5 is the authority for why the temporal checks are not `CHECK`
+constraints.
+
+**Who may write.** Create, update and delete: `admin` and `hr` for any employee; `manager`
+only for employees in their own department (themselves included); `tl` and `employee` are
+denied. This matches `firestore.rules` (`canManageCanonicalEmployeeRecord`) and the auth
+matrix. The premise that Firestore let employees write their own attendance was wrong: no
+role outside that set ever could, and the frontend already hides Mark/Edit/Delete from them.
+Letting TLs write for their team, or employees self-record check-in/out, was considered and
+is out of scope — employee self-service would be a new feature (self-attested times, a
+different endpoint shape, a status subset) and gets its own design.
+
+**Delete is soft, and records the deleter.** Delete sets `deleted_at` and a new
+`deleted_by_employee_id`; see the second correction after D1. Attendance feeds payroll, so "a
+record vanished and nobody knows who removed it" is a real gap, not a cosmetic one. This needs
+a **new migration `007`** (never an edit to `001`–`006`), written at implementation time. Two
+design points are left to that migration rather than settled here: the FK to `employees(id)`
+should be `ON DELETE SET NULL` (a `RESTRICT` audit pointer would block ever hard-deleting an
+employee), and a `CHECK` should require `deleted_at IS NOT NULL` whenever
+`deleted_by_employee_id` is set.
+
+**Future dates use a configured company timezone.** `work_date` must be on or before today in
+a configured IANA timezone, evaluated against an injectable clock so the service tests do not
+depend on wall time. UTC (Firestore's `request.time.date()`) was rejected: for a UTC+5
+workforce it would reject marking today's attendance between 00:00 and 05:00 local. The check
+lives in the service layer, per §5.
+The company timezone is **`Asia/Karachi`**, supplied through the required environment variable
+`COMPANY_TIMEZONE`. It is validated as an IANA name at startup and has **no default**: a
+missing or misspelled value must fail startup loudly rather than fall back silently to
+something wrong. `Asia/Karachi` is a deployment setting, not a code constant, and
+`.env.example` carries only a placeholder (added at implementation time). Nothing in the
+backend has a timezone setting today.
+
+**Re-attribution is scope-checked on both sides.** `PATCH` may change `employee_id` (Firestore
+parity), but the scope check must pass for the employee the record is moving **from** (the
+stored record's current `employee_id`) *and* the employee it is moving **to**, and it runs
+before anything is written. Checking only the destination would let a manager pull a record
+out of another department into their own and end up holding a record they were never allowed
+to touch. `admin` and `hr` pass trivially (company-wide). A `work_date` change stays subject to
+D9's uniqueness.
+
+**The `created_at` / `updated_at` "is today" checks are dropped.** Firestore's
+`createdAt == updatedAt`, `createdAt` is today and `updatedAt` is today checks existed because
+the client authored timestamps. Here the request schema is strict (client-supplied timestamps
+are rejected) and `now()` plus the `set_updated_at()` trigger set them, so the conditions hold
+by construction. This supersedes the "`updated_at` bounds" wording in the Phase 6 plan and
+fills the missing create-side row in §5.
+
+**Accepted defaults.** These were put forward with a recommendation and explicitly accepted:
+- *No edit window.* Permitted writers may edit or delete past records (Firestore parity). A
+  lock on closed periods belongs to a payroll-period mechanism, not to attendance.
+- *Active-employee requirement is narrower than Firestore's.* The referenced employee must have
+  `employment_status = 'active'` on create and when `employee_id` changes, but not on every
+  update, so a deactivated employee's historical records stay correctable. As an enum, the
+  status removes the trim/lowercase split-brain described in §5.2.
+- *Wire format.* Times are `HH:MM` or `null` (no `""` sentinel); `notes` is nullable.

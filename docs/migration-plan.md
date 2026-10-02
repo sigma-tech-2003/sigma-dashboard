@@ -156,7 +156,7 @@ Every transformation identified below is implemented:
 **Depended on.** Phases 0-1. [D17](schema-design.md#d17--employee_number-generation) —
 resolved for the importer's purposes: `employee_number` is preserved verbatim from the
 source `empId`, sidestepping the still-open generation policy for *new* hires, which is a
-Phase 4 concern. [D9](schema-design.md#d9--attendance-uniqueness) — the importer **fails
+Phase 4 concern. [D9](schema-design.md#d9--attendance-uniqueness--settled) — the importer **fails
 loudly on duplicate attendance rows**, exactly as intended.
 
 **Verified.** 125 tests pass without a database. Then end-to-end against
@@ -283,7 +283,7 @@ confirming the decided rule and matching `firestore.rules:768,773,786`.
 future dates, `updated_at` bounds — implemented in the service layer per
 [schema-design.md §5](schema-design.md#5-where-each-firestorerules-validation-goes-and-why).
 
-**Depends on.** Phase 5. [D9](schema-design.md#d9--attendance-uniqueness).
+**Depends on.** Phase 5. [D9](schema-design.md#d9--attendance-uniqueness--settled).
 
 **Verified by.** The structural constraints reject bad rows at the database level:
 `check_out > check_in`, and `absent`/`leave` forcing null times. Service tests cover the
