@@ -11,6 +11,7 @@ import { createPasswordSetTokenRepository } from "./repositories/passwordSetToke
 import { createRefreshTokenRepository } from "./repositories/refreshTokenRepository.js";
 import { createUserRepository } from "./repositories/userRepository.js";
 import { createAuthService } from "./services/authService.js";
+import { createDepartmentMutationService } from "./services/departmentMutationService.js";
 import { createEmployeeMutationService } from "./services/employeeMutationService.js";
 import { createPasswordSetService } from "./services/passwordSetService.js";
 
@@ -27,6 +28,7 @@ export function getContainer() {
     const userRepository = createUserRepository(database);
     const refreshTokenRepository = createRefreshTokenRepository(database);
     const employeeRepository = createEmployeeRepository(database);
+    const departmentRepository = createDepartmentRepository(database);
     const passwordSetTokenRepository = createPasswordSetTokenRepository(database);
     const passwordSetService = createPasswordSetService({
       passwordSetTokenRepository,
@@ -40,7 +42,7 @@ export function getContainer() {
       refreshTokenRepository,
       employeeRepository,
       passwordSetTokenRepository,
-      departmentRepository: createDepartmentRepository(database),
+      departmentRepository,
       projectRepository: createProjectRepository(database),
       kpiRepository: createKpiRepository(database),
       leaveRepository: createLeaveRepository(database),
@@ -53,6 +55,7 @@ export function getContainer() {
       }),
       passwordSetService,
       employeeMutationService: createEmployeeMutationService({ employeeRepository, passwordSetService }),
+      departmentMutationService: createDepartmentMutationService({ departmentRepository }),
     });
   }
   return container;

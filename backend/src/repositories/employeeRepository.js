@@ -265,6 +265,12 @@ export function createEmployeeRepository(database) {
      * itself does not depend on this: findPrincipalByUserId's join already requires
      * employees.deleted_at IS NULL, so a deleted employee cannot obtain a principal even
      * without this.
+     *
+     * Also clears manager_employee_id on any department this employee currently manages
+     * (D15, settled): no replacement is required, since nothing downstream depends on a
+     * department having a manager the way scope depends on a real team lead. Without this,
+     * the department would be left pointing at a soft-deleted employee instead of a clean
+     * null.
      */
     async deleteById(id, { replacementTeamLeadId = null, reassignedMemberIds = [] } = {}) {
       const client = await database.connect();
@@ -295,6 +301,10 @@ export function createEmployeeRepository(database) {
           }
         }
 
+        await client.query(
+          "UPDATE departments SET manager_employee_id = NULL WHERE manager_employee_id = $1",
+          [id],
+        );
         await client.query("UPDATE employees SET deleted_at = now() WHERE id = $1", [id]);
         await client.query("UPDATE users SET deleted_at = now() WHERE id = $1", [target.user_id]);
 

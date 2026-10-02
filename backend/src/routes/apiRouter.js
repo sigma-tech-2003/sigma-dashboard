@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getContainer, verifyAccessToken } from "../container.js";
 import { createAuthenticationMiddleware } from "../middleware/authentication.js";
 import { createAuthRouter } from "./authRoutes.js";
+import { createDepartmentRouter } from "./departmentRoutes.js";
 import { createEmployeeRouter } from "./employeeRoutes.js";
 import { healthRouter } from "./healthRoutes.js";
 import { createResourceRouter } from "./resourceRoutes.js";
@@ -23,11 +24,11 @@ const RESOURCE_ROUTES = [
 ];
 
 /**
- * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object, employeeMutationService?: object, passwordSetService?: object }} [dependencies]
+ * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object, employeeMutationService?: object, departmentMutationService?: object, passwordSetService?: object }} [dependencies]
  *   `repositories` lets tests inject fakes keyed the same as the container
  *   (employeeRepository, departmentRepository, ...) without a database. `authService`,
- *   `employeeMutationService` and `passwordSetService` let tests inject fake/differently-
- *   backed services for the routes mounted below.
+ *   `employeeMutationService`, `departmentMutationService` and `passwordSetService` let
+ *   tests inject fake/differently-backed services for the routes mounted below.
  */
 export function createApiRouter(dependencies = {}) {
   const router = Router();
@@ -61,6 +62,9 @@ export function createApiRouter(dependencies = {}) {
 
   const getEmployeeMutationService = () => dependencies.employeeMutationService ?? getContainer().employeeMutationService;
   router.use("/employees", createEmployeeRouter(getEmployeeMutationService));
+
+  const getDepartmentMutationService = () => dependencies.departmentMutationService ?? getContainer().departmentMutationService;
+  router.use("/departments", createDepartmentRouter(getDepartmentMutationService));
 
   return router;
 }
