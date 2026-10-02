@@ -187,6 +187,30 @@ test("deleteById: no replacement just soft-deletes both rows -- no role or team_
   assert.deepEqual(userDelete.values, ["user-1"]);
 });
 
+test("deleteById: D15 -- also clears manager_employee_id on any department this employee manages", async () => {
+  const database = fakeDatabase([
+    ["SELECT id, user_id FROM employees", { rows: [{ id: "employee-1", user_id: "user-1" }] }],
+    ["UPDATE departments SET manager_employee_id = NULL", { rows: [] }],
+    ["UPDATE employees SET deleted_at", { rows: [] }],
+    ["UPDATE users SET deleted_at", { rows: [] }],
+  ]);
+  const repository = createEmployeeRepository(database);
+
+  await repository.deleteById("employee-1", {});
+
+  const texts = database.calls.map((call) => call.text);
+  const clearManagerIndex = texts.findIndex((text) => text.includes("UPDATE departments SET manager_employee_id = NULL"));
+  const deleteEmployeeIndex = texts.findIndex((text) => text.includes("UPDATE employees SET deleted_at"));
+
+  assert.notEqual(clearManagerIndex, -1, "the department-manager clear must actually run");
+  assert.ok(clearManagerIndex < deleteEmployeeIndex, "clears the department before soft-deleting the employee");
+
+  const clearManagerCall = database.calls[clearManagerIndex];
+  assert.deepEqual(clearManagerCall.values, ["employee-1"]);
+  assert.equal(texts.at(0), "BEGIN");
+  assert.equal(texts.at(-1), "COMMIT");
+});
+
 test("deleteById: with a replacement, promotes them, clears their team_lead_id, reassigns members, then deletes the target", async () => {
   const database = fakeDatabase([
     [/SELECT (?:id, )?user_id FROM employees/, (values) => {
