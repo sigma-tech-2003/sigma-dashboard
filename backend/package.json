@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/db/migrator.js && node --check scripts/migrate.js && node --check scripts/validate-schema.js && node --check scripts/import-firestore.js && node --check scripts/export-firestore.js && node --check scripts/parity-harness.js && node --check scripts/bootstrap-admin.js",
+    "check": "node --check src/server.js && node --check src/db/migrator.js && node --check scripts/migrate.js && node --check scripts/validate-schema.js && node --check scripts/import-firestore.js && node --check scripts/export-firestore.js && node --check scripts/parity-harness.js && node --check scripts/bootstrap-admin.js && node --check scripts/e2e-attendance.js",
     "test": "node --test",
     "db:migrate": "node scripts/migrate.js",
     "db:rollback": "node src/db/migrator.js",
