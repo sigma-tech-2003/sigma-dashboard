@@ -42,7 +42,7 @@ Sequencing is in [migration-plan.md](migration-plan.md). Open decisions are in [
 | `companies` unconstrained row count | singleton index | decided: single company |
 | no `deleted_at` anywhere | `deleted_at` on business tables | soft/hard delete undecided |
 | six collections have no table | `projects`, `project_assignments`, `kpis`, `leaves`, `attendance`, `payroll` | the bulk of the product |
-| `ON DELETE SET NULL` on `departments.manager_employee_id` (`:122`) | `ON DELETE RESTRICT` | "required reassignment, not a nullable orphan" applies to managers as it does to TLs — see [§9 D15](#d15--does-required-reassignment-extend-to-department-managers) |
+| `ON DELETE SET NULL` on `departments.manager_employee_id` (`:122`) | `ON DELETE RESTRICT` | the FK itself still tightens, but settled as **not** requiring reassignment the way TLs do — manager_employee_id is auto-cleared to null in the service layer — see [§9 D15](#d15--does-required-reassignment-extend-to-department-managers--settled) |
 
 Retained from `001` as-is: the `user_role` enum, the `set_updated_at()` trigger function and
 its per-table triggers, `pgcrypto`/`gen_random_uuid()`, and the composite-FK technique that
@@ -594,8 +594,12 @@ ALTER TABLE departments
 ```
 
 Same technique as `001:119-122`, with two changes: `company_id` drops out of the key (single
-company), and `ON DELETE SET NULL` becomes `ON DELETE RESTRICT` so a department manager
-cannot be silently orphaned — mirroring the TL rule. See [§9 D15](#d15--does-required-reassignment-extend-to-department-managers).
+company), and `ON DELETE SET NULL` becomes `ON DELETE RESTRICT`. **Correction:** this does
+not mirror the TL rule the way it first appears to — `departments` is soft-deleted in practice
+(see the correction after D1), so this FK is inert on the real deletion path, exactly as
+`employees_team_lead_department_foreign_key` is. D15 settled the actual behavior as auto-
+clearing `manager_employee_id` to null in the service layer, not requiring a replacement. See
+[§9 D15](#d15--does-required-reassignment-extend-to-department-managers--settled).
 
 ### 4.12 `leaveBalances` — dropped
 
@@ -818,6 +822,16 @@ database-level guarantee that a team lead cannot be orphaned (§4.4) only applie
 obligation**, with the foreign key as a backstop for any code path that does hard-delete.
 §8 items 5-9 remain open.
 
+> **Correction:** despite the "hard delete everywhere else" sentence above, `departments` is
+> actually wired up as soft-delete in practice — it has a `deleted_at` column,
+> `departments_name_unique` is a partial index on `deleted_at IS NULL`, and
+> `departmentRepository.js` filters every query on `deleted_at IS NULL`. That sentence is
+> stale for this one table; do not trust it. The same "`ON DELETE RESTRICT` does not fire on
+> a soft delete" point made above applies equally to both of `departments`'s own foreign
+> keys — see [D15](#d15--does-required-reassignment-extend-to-department-managers--settled)
+> and [D26](#d26--deleting-a-department-that-still-has-employees-in-it--settled), both of
+> which are service-layer obligations for exactly this reason, not database guarantees.
+
 ### D2 — Rewrite `001` or add `002` — ✅ SETTLED
 **`001` has never been applied to any database; it is rewritten in place. There is no `002`.**
 Implemented: `001_initial_core_hr_hierarchy.up.sql` and `.down.sql` now match this document,
@@ -906,10 +920,28 @@ RLS would push it into the database and make a repository bug non-exploitable, a
 per-request `SET LOCAL` on pooled connections. Worth deciding deliberately rather than by
 default.
 
-### D15 — Does "required reassignment" extend to department managers?
+### D15 — Does "required reassignment" extend to department managers? — ✅ SETTLED
 The decision covers TLs explicitly. I applied the same rule to `departments.manager_employee_id`
 (`ON DELETE RESTRICT` rather than `001`'s `SET NULL`) on the grounds that a department without
 a manager is the same class of orphan. Confirm, or revert that one to `SET NULL`.
+
+**Settled: it is not the same class of orphan, and the TL analogy does not hold.** A dangling
+`team_lead_id` breaks *another employee's own* scope and visibility —
+`employeeScopeService.js`'s team predicate depends on it pointing at a real team lead. A
+department with no manager breaks nothing downstream: department-scoped authorization keys
+off `department_id` alone, never off `manager_employee_id`. Forcing reassignment ceremony
+here would defend against a risk that isn't structurally present.
+
+When a department's manager is removed — the employee is deleted
+(`employeeMutationService.deleteEmployee`), or a department update clears
+`manager_employee_id` directly — `manager_employee_id` is simply cleared to `null` in the
+service layer, no replacement required. This is the practical equivalent of reverting the FK
+to `ON DELETE SET NULL`, the alternative this entry itself originally offered, except
+enforced in application code rather than left to the database: `departments` is soft-deleted
+in practice (see the correction after D1), so `departments_manager_employee_foreign_key`'s
+`ON DELETE RESTRICT` never actually fires on the real deletion path, exactly as it doesn't
+for employees' own foreign keys. Reassigning a new manager afterward is an ordinary, unforced
+`PATCH /api/v1/departments/:id` — not a blocking requirement.
 
 ### D16 — Deleting a TL who has no members — ✅ SETTLED
 The replacement must come from "that tl's own members". A TL with zero members has no
@@ -1070,3 +1102,31 @@ response) delivered by an actual email send, and this decision should be revisit
 than assumed permanent. A future reader finding this code should not conclude that returning
 raw credentials in API responses is this codebase's general pattern — it is a deliberate,
 narrow exception made for exactly one flow, for exactly this reason.
+
+### D26 — Deleting a department that still has employees in it — ✅ SETTLED
+
+`employees.department_id` is `NOT NULL`, so a department cannot be deleted out from under its
+own staff. Unlike D16's team-lead case there is no "zero employees, nothing to orphan" escape
+hatch — a department either has employees or it doesn't, and if it does, something must
+happen to them first.
+
+**Settled: block outright, no bulk reassignment.** `DELETE /api/v1/departments/:id` refuses
+with `409 department_has_employees` if any live (`deleted_at IS NULL`) employee has that
+`department_id` — and the error reports *how many* are blocking it, so the caller knows what
+they are dealing with rather than being told only that the delete failed. Moving people out
+is done individually, via the already-built `PATCH /api/v1/employees/:id` (`department_id`
+change, Phase 4 Part B) — no new bulk-move logic is introduced for this.
+
+A bulk-reassignment option was considered and deliberately rejected: `DELETE` accepting a
+target department and moving every remaining employee into it in one transaction. Moving an
+arbitrary, potentially large set of unrelated people is a materially bigger and riskier piece
+of transactional logic than anything this reassignment problem has needed so far — the
+TL-replacement flow (§6.1) only ever moves a bounded, already-known set (one TL's own direct
+reports). A department merge/bulk-move tool deserves to be its own deliberately-designed
+feature if it is ever actually needed, not a side effect of a delete endpoint.
+
+Like D15, this is a service-layer obligation, not a database guarantee:
+`employees_department_company_foreign_key`'s `ON DELETE RESTRICT` would block a hard delete,
+but `departments` is soft-deleted in practice (see the correction after D1), so the live-
+employee count check above is the only thing actually preventing a department from vanishing
+while its employees still silently point at it.
