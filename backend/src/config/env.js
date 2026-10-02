@@ -76,6 +76,37 @@ export function getAuthConfig() {
   });
 }
 
+/**
+ * The IANA timezone that defines "today" for attendance (D27). Required, with no default: a
+ * missing or misspelled value must fail loudly rather than silently fall back to a zone that
+ * would wrongly accept or reject a day's attendance. server.js calls this before listening,
+ * so a bad value stops the process at boot instead of failing the first request.
+ *
+ * A function, like getAuthConfig, so importing this module never throws.
+ */
+export function getCompanyTimezone() {
+  const timeZone = readString(process.env.COMPANY_TIMEZONE);
+  if (!timeZone) {
+    throw new Error("COMPANY_TIMEZONE must be set to an IANA timezone name, e.g. Asia/Karachi.");
+  }
+
+  // Intl also accepts UTC-offset forms like "+05:00", which are not IANA names and carry no
+  // daylight-saving rules; reject them explicitly.
+  let valid = !/^[+-]/.test(timeZone);
+  if (valid) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone });
+    } catch {
+      valid = false;
+    }
+  }
+  if (!valid) {
+    throw new Error(`COMPANY_TIMEZONE "${timeZone}" is not a valid IANA timezone name, e.g. Asia/Karachi.`);
+  }
+
+  return timeZone;
+}
+
 export function getDatabaseConfig() {
   const connectionString = readString(process.env.DATABASE_URL);
   if (!connectionString) {

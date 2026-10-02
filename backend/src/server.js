@@ -1,5 +1,9 @@
 import { createApp } from "./app.js";
-import { environment } from "./config/env.js";
+import { environment, getCompanyTimezone } from "./config/env.js";
+
+// Fail at boot, not on the first attendance request: a missing or invalid COMPANY_TIMEZONE
+// would otherwise only surface when the container is first built.
+getCompanyTimezone();
 
 const app = createApp();
 

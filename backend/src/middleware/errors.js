@@ -11,7 +11,9 @@ export function errorHandler(error, req, res, _next) {
   const code = knownError ? error.code : "internal";
   const message = knownError ? error.message : "The request could not be completed.";
 
+  const details = knownError ? error.details : undefined;
+
   res.status(statusCode).json({
-    error: { code, message, requestId: req.requestId },
+    error: { code, message, ...(details !== undefined ? { details } : {}), requestId: req.requestId },
   });
 }

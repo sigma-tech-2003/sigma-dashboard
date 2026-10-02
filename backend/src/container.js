@@ -1,4 +1,4 @@
-import { getAuthConfig } from "./config/env.js";
+import { getAuthConfig, getCompanyTimezone } from "./config/env.js";
 import { getPool } from "./db/pool.js";
 import { createAttendanceRepository } from "./repositories/attendanceRepository.js";
 import { createDepartmentRepository } from "./repositories/departmentRepository.js";
@@ -10,6 +10,7 @@ import { createProjectRepository } from "./repositories/projectRepository.js";
 import { createPasswordSetTokenRepository } from "./repositories/passwordSetTokenRepository.js";
 import { createRefreshTokenRepository } from "./repositories/refreshTokenRepository.js";
 import { createUserRepository } from "./repositories/userRepository.js";
+import { createAttendanceMutationService } from "./services/attendanceMutationService.js";
 import { createAuthService } from "./services/authService.js";
 import { createDepartmentMutationService } from "./services/departmentMutationService.js";
 import { createEmployeeMutationService } from "./services/employeeMutationService.js";
@@ -29,6 +30,7 @@ export function getContainer() {
     const refreshTokenRepository = createRefreshTokenRepository(database);
     const employeeRepository = createEmployeeRepository(database);
     const departmentRepository = createDepartmentRepository(database);
+    const attendanceRepository = createAttendanceRepository(database);
     const passwordSetTokenRepository = createPasswordSetTokenRepository(database);
     const passwordSetService = createPasswordSetService({
       passwordSetTokenRepository,
@@ -46,7 +48,7 @@ export function getContainer() {
       projectRepository: createProjectRepository(database),
       kpiRepository: createKpiRepository(database),
       leaveRepository: createLeaveRepository(database),
-      attendanceRepository: createAttendanceRepository(database),
+      attendanceRepository,
       payrollRepository: createPayrollRepository(database),
       authService: createAuthService({
         authConfig,
@@ -56,6 +58,11 @@ export function getContainer() {
       passwordSetService,
       employeeMutationService: createEmployeeMutationService({ employeeRepository, passwordSetService }),
       departmentMutationService: createDepartmentMutationService({ departmentRepository }),
+      attendanceMutationService: createAttendanceMutationService({
+        attendanceRepository,
+        employeeRepository,
+        timeZone: getCompanyTimezone(),
+      }),
     });
   }
   return container;
