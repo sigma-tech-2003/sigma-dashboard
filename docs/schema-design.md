@@ -578,15 +578,25 @@ CREATE TABLE payroll (
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now(),
   deleted_at  timestamptz,
+  -- Who soft-deleted the row (D28). Added by migration 008, not 001; ON DELETE SET NULL so
+  -- an audit pointer never blocks hard-deleting an employee.
+  deleted_by_employee_id uuid REFERENCES employees(id) ON DELETE SET NULL,
 
   CONSTRAINT payroll_year_range   CHECK (period_year BETWEEN 1 AND 9999),
   CONSTRAINT payroll_month_range  CHECK (period_month BETWEEN 1 AND 12),
   CONSTRAINT payroll_amounts_non_negative
-    CHECK (basic >= 0 AND allowances >= 0 AND bonus >= 0 AND deductions >= 0)
+    CHECK (basic >= 0 AND allowances >= 0 AND bonus >= 0 AND deductions >= 0),
+
+  -- A deleter may only be recorded on a row that is actually deleted (008).
+  CONSTRAINT payroll_deleted_by_requires_deleted_at
+    CHECK (deleted_by_employee_id IS NULL OR deleted_at IS NOT NULL)
 );
 
 CREATE UNIQUE INDEX payroll_employee_period_unique
   ON payroll (employee_id, period_year, period_month) WHERE deleted_at IS NULL;
+-- Serves the ON DELETE SET NULL scan above (008).
+CREATE INDEX payroll_deleted_by_index
+  ON payroll (deleted_by_employee_id) WHERE deleted_by_employee_id IS NOT NULL;
 ```
 
 Firestore stores `month` as an **English month name** (`firestore.rules:600-612`); this uses
@@ -594,6 +604,11 @@ Firestore stores `month` as an **English month name** (`firestore.rules:600-612`
 and the API formats back for display.
 
 **`gross`, `tax` and `net` are generated columns** — see §5 for why.
+
+`payroll` is soft-deleted, and the delete records who did it in `deleted_by_employee_id`; the
+block above shows the table as it stands after migration `008`, which added that column, its
+`CHECK` and its index to the `001` definition. See the third note under
+[D1](#d1--soft-or-hard-delete--settled) and [D28](#d28--payroll-write-rules--settled).
 
 `payroll_tax_for` is a separate `IMMUTABLE` function so the bracket table exists in exactly
 one place; a generated column cannot reference another generated column, so `net` calls the
@@ -855,6 +870,14 @@ obligation**, with the foreign key as a backstop for any code path that does har
 > `attendance.employee_id` as well. The delete path also records *who* deleted the row — see
 > [D27](#d27--attendance-write-rules--settled).
 
+> **Third note (payroll):** unlike `departments` and `attendance`, `payroll` needed no
+> correction: D1's "soft delete for `payroll`" is accurate. It has a `deleted_at` column,
+> `payroll_employee_period_unique` is a partial index on `deleted_at IS NULL`, and
+> `payrollRepository.js` filters every query on `payroll.deleted_at IS NULL`. What it lacked
+> was a record of who deleted a row — added by D28 — and §8 item 5 (statutory retention) is
+> closed by the same decision: no hard-delete path will exist. See
+> [D28](#d28--payroll-write-rules--settled).
+
 ### D2 — Rewrite `001` or add `002` — ✅ SETTLED
 **`001` has never been applied to any database; it is rewritten in place. There is no `002`.**
 Implemented: `001_initial_core_hr_hierarchy.up.sql` and `.down.sql` now match this document,
@@ -894,6 +917,13 @@ Making them generated columns means no one can ever record a manually adjusted t
 not through the API, not through `psql`. That exactly matches Firestore's behavior today.
 Confirm no payroll correction workflow needs an override. If one does, `tax` must become a
 plain column with a `CHECK`, which is weaker.
+
+**✅ SETTLED (Phase 7).** `tax` and `net` stay generated, and no override is ever added. The
+correction workflow is not an override: a processed record is immutable, so correcting one means
+soft-deleting it and processing a new one for the period, which the partial
+`payroll_employee_period_unique` index permits. See
+[D28](#d28--payroll-write-rules--settled). (This heading keeps its original text so the
+existing link to it from `migration-plan.md` still resolves.)
 
 ### D8 — Self-approval ban is broader than Firestore's
 Firestore bans self-approval **only for TLs** (`firestore.rules:358`); admin, HR and managers
@@ -1022,6 +1052,7 @@ These were flagged in the earlier documents and the settled decisions do not res
   endpoint, or does the ETL make it unnecessary?
 - **A5** — payroll `draft` is unreachable today. `payroll_status` retains both values and
   defaults to `'processed'`, preserving current behavior. Should `draft` become reachable?
+  **Resolved:** yes — see [D28](#d28--payroll-write-rules--settled).
 - **A6** — validators-on-read. Generated columns eliminate this for payroll. It remains a
   question for whether the new API should hide or surface malformed rows.
 - **A8** — manager and TL cannot read projects/KPIs through rules, only via
@@ -1223,3 +1254,74 @@ fills the missing create-side row in §5.
   update, so a deactivated employee's historical records stay correctable. As an enum, the
   status removes the trim/lowercase split-brain described in §5.2.
 - *Wire format.* Times are `HH:MM` or `null` (no `""` sentinel); `notes` is nullable.
+
+### D28 — Payroll write rules — ✅ SETTLED
+
+Decided before Phase 7 implementation. Everything here is a service-layer or API-layer rule
+unless it says otherwise; `gross`, `tax` and `net` remain generated columns (§5, D7), so the
+service never does payroll arithmetic.
+
+**Who may write.** Create, edit and delete: `admin` and `hr`, for any employee. `manager`, `tl`
+and `employee` are denied; an employee keeps read-only access to their own `processed` rows
+(unchanged from Phase 3). This matches `firestore.rules`, the auth matrix, Phase 7's own text and
+the frontend's `managePayroll`. As for attendance, an account not linked to an employee record is
+denied, because the acting employee's id is recorded as the deleter. Admin and hr may process
+payroll for their own employee record, as Firestore allowed. Admin-only, and widening to managers,
+were considered and rejected: neither has a source behind it.
+
+**Status lifecycle — resolves A5.** `POST` accepts `status` (`draft` or `processed`), defaulting
+to `processed`, so today's behavior is the default. A `draft` is fully editable — employee,
+period, `basic`, `allowances`, `bonus`, `deductions` — and can be promoted to `processed`, alone or
+in the same request as field edits, validated as the merged record. A `processed` record is
+**immutable**, exactly as in Firestore, and `processed` → `draft` is refused. A `PATCH` of a
+processed record is refused with a conflict error. Employees never see drafts
+(`buildPayrollScopeFilter`, unchanged). Consequences accepted: a corrected payslip has a new id,
+and an off-cycle bonus means soft-deleting and re-processing the period's single row. Strict
+parity (a `PATCH` that only promotes imported drafts) was rejected because it would build an
+endpoint no client can reach; making processed records editable was rejected because there is no
+history table, so an edit would silently change a payslip an employee may already have seen.
+
+**Duplicate employee and period — mirrors D9.** The unique index
+`payroll_employee_period_unique` is new; Firestore allowed unlimited rows and the frontend never
+checked. A second live record for the same employee and period returns
+`409 payroll_already_recorded` carrying the existing record's id. A draft `PATCH` that moves it
+onto an occupied period gets the same 409 (mapped from `23505` on that index). A soft-deleted row
+does not block re-processing, because the index is partial. Rejected: upsert on `POST` (it would
+silently overwrite a processed payslip) and several rows per period (it contradicts the index and
+the importer's `duplicate-payroll-period` conflict).
+
+**Delete is soft, for any status, and records the deleter.** Delete sets `deleted_at` and a new
+`deleted_by_employee_id`; see the third note after D1. There is no hard-delete path, which closes
+§8 item 5. Because processed records are immutable, soft delete is also the only correction path,
+which is what settles D7. This needs a **new migration `008`** (never an edit to `001`–`007`),
+written at implementation time. As for `007`, the design points are left to the migration: the FK
+to `employees(id)` should be `ON DELETE SET NULL`, a `CHECK` should require `deleted_at IS NOT
+NULL` whenever the deleter is set, and a partial index should serve the `SET NULL` scan. Rejected:
+drafts-only soft delete (a mistaken processed row could never be removed, leaving no correction
+path) and hard delete.
+
+**Pay inputs.** `basic` and `allowances` default to the employee's *current* values when omitted;
+explicit values are accepted, which is what backdated periods, raises and corrections need.
+`bonus` and `deductions` default to `0`. `gross`, `tax` and `net` are never accepted from the
+client; the strict schema refuses them. Only admin and hr can write payroll and the same roles
+can change an employee's compensation, so defaulting and overriding open no privilege gap.
+Amounts with more than two decimal places, or beyond `numeric(12,2)`'s range, are rejected with a
+400 rather than being silently rounded or overflowing in the database.
+
+**Which employees.** The referenced employee must be live (`deleted_at IS NULL`). Their
+`employment_status` is **not** checked, so final pay for an employee who is terminated, inactive
+or on leave still works — Firestore only required the employee to exist, and this is deliberately
+unlike attendance's active requirement (D27). It applies on create and when a draft's
+`employee_id` changes.
+
+**Periods.** `period_month` is an integer 1–12 on the wire (Firestore's English month names are
+an ETL concern only). There is no temporal check beyond the existing year 1–9999 and month 1–12
+`CHECK`s: future periods are not rejected, as Firestore did not.
+
+**Serialization.** Payroll's shared column list selects the money columns (`basic`, `allowances`,
+`bonus`, `deductions`, `gross`, `tax`, `net`) as `float8`, so reads and write responses carry JSON
+numbers. `pg` returns `numeric` as a string, and the frontend adds these values
+(`p.basic + p.allowances + p.bonus`), which would concatenate; `parityService.js` compares with
+`Number(a) === Number(b)`, which is why the harness never showed it. `numeric(12,2)` has at most
+12 significant digits, which a double holds exactly. This is payroll-only: the same string
+behavior on `employees.basic` and `employees.allowances` is a known, separate fix.
