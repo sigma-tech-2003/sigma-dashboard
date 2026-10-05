@@ -15,6 +15,7 @@ import { createAuthService } from "./services/authService.js";
 import { createDepartmentMutationService } from "./services/departmentMutationService.js";
 import { createEmployeeMutationService } from "./services/employeeMutationService.js";
 import { createPasswordSetService } from "./services/passwordSetService.js";
+import { createPayrollMutationService } from "./services/payrollMutationService.js";
 
 /**
  * Composition root. Built lazily on first use so that importing the app -- for tests, or
@@ -31,6 +32,7 @@ export function getContainer() {
     const employeeRepository = createEmployeeRepository(database);
     const departmentRepository = createDepartmentRepository(database);
     const attendanceRepository = createAttendanceRepository(database);
+    const payrollRepository = createPayrollRepository(database);
     const passwordSetTokenRepository = createPasswordSetTokenRepository(database);
     const passwordSetService = createPasswordSetService({
       passwordSetTokenRepository,
@@ -49,7 +51,7 @@ export function getContainer() {
       kpiRepository: createKpiRepository(database),
       leaveRepository: createLeaveRepository(database),
       attendanceRepository,
-      payrollRepository: createPayrollRepository(database),
+      payrollRepository,
       authService: createAuthService({
         authConfig,
         userRepository,
@@ -63,6 +65,7 @@ export function getContainer() {
         employeeRepository,
         timeZone: getCompanyTimezone(),
       }),
+      payrollMutationService: createPayrollMutationService({ payrollRepository, employeeRepository }),
     });
   }
   return container;
