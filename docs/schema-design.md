@@ -294,6 +294,9 @@ CREATE TABLE projects (
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
   deleted_at    timestamptz,
+  -- Who soft-deleted the row (D29). Added by migration 009, not 001; ON DELETE SET NULL so
+  -- an audit pointer never blocks hard-deleting an employee.
+  deleted_by_employee_id uuid REFERENCES employees(id) ON DELETE SET NULL,
   CONSTRAINT projects_title_not_blank CHECK (length(btrim(title)) > 0),
   CONSTRAINT projects_dates_ordered   CHECK (due_date >= start_date),
   CONSTRAINT projects_department_company_foreign_key
@@ -301,18 +304,29 @@ CREATE TABLE projects (
   CONSTRAINT projects_team_lead_department_foreign_key
     FOREIGN KEY (team_lead_id, department_id)
     REFERENCES employees (id, department_id) ON DELETE RESTRICT,
-  CONSTRAINT projects_scope_unique UNIQUE (id, department_id)
+  CONSTRAINT projects_scope_unique UNIQUE (id, department_id),
+  -- A deleter may only be recorded on a row that is actually deleted (009).
+  CONSTRAINT projects_deleted_by_requires_deleted_at
+    CHECK (deleted_by_employee_id IS NULL OR deleted_at IS NOT NULL)
 );
 
 CREATE INDEX projects_department_status_index
   ON projects (department_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX projects_team_lead_index
   ON projects (team_lead_id) WHERE deleted_at IS NULL;
+-- Serves the ON DELETE SET NULL scan above (009).
+CREATE INDEX projects_deleted_by_index
+  ON projects (deleted_by_employee_id) WHERE deleted_by_employee_id IS NOT NULL;
 ```
 
 `projects_dates_ordered` replaces `projectMutationService.js:321-329`. The legacy `name`
 field — readable but unwritable (`PROTECTED_PROJECT_FIELDS`, `:21-34`) — is **dropped**; the
 ETL coalesces `title` then `name`.
+
+`projects` is soft-deleted, and the delete records who did it in `deleted_by_employee_id`; the
+block above shows the table as it stands after migration `009`, which added that column, its
+`CHECK` and its index to the `001` definition. See the fourth note under
+[D1](#d1--soft-or-hard-delete--settled) and [D29](#d29--project-and-kpi-write-rules--settled).
 
 ### 4.6 `project_assignments` — from `projects.assignedEmployeeIds[]`
 
@@ -365,6 +379,9 @@ CREATE TABLE kpis (
   created_at            timestamptz NOT NULL DEFAULT now(),
   updated_at            timestamptz NOT NULL DEFAULT now(),
   deleted_at            timestamptz,
+  -- Who soft-deleted the row (D29). Added by migration 009, not 001; ON DELETE SET NULL so
+  -- an audit pointer never blocks hard-deleting an employee.
+  deleted_by_employee_id uuid REFERENCES employees(id) ON DELETE SET NULL,
 
   CONSTRAINT kpis_title_not_blank      CHECK (length(btrim(title)) > 0),
   CONSTRAINT kpis_target_positive      CHECK (target > 0),
@@ -382,11 +399,18 @@ CREATE TABLE kpis (
 
   -- rating, rater and timestamp move together
   CONSTRAINT kpis_rating_fields_consistent
-    CHECK (num_nulls(rating, rated_by_employee_id, rated_at) IN (0, 3))
+    CHECK (num_nulls(rating, rated_by_employee_id, rated_at) IN (0, 3)),
+
+  -- A deleter may only be recorded on a row that is actually deleted (009).
+  CONSTRAINT kpis_deleted_by_requires_deleted_at
+    CHECK (deleted_by_employee_id IS NULL OR deleted_at IS NOT NULL)
 );
 
 CREATE INDEX kpis_employee_index ON kpis (employee_id) WHERE deleted_at IS NULL;
 CREATE INDEX kpis_project_index  ON kpis (project_id)  WHERE deleted_at IS NULL AND project_id IS NOT NULL;
+-- Serves the ON DELETE SET NULL scan above (009).
+CREATE INDEX kpis_deleted_by_index
+  ON kpis (deleted_by_employee_id) WHERE deleted_by_employee_id IS NOT NULL;
 ```
 
 **Two of the three preserved bans live here as constraints.** `kpis_no_self_rating` and
@@ -397,6 +421,12 @@ in one code path.
 
 `kpis_rating_fields_consistent` has no Firestore equivalent; it prevents the half-rated rows
 that `kpiMutationService.js:769-777` avoids only by writing all three fields together.
+
+`kpis` is soft-deleted, and the delete records who did it in `deleted_by_employee_id`; the block
+above shows the table as it stands after migration `009`, which added that column, its `CHECK` and
+its index to the `001` definition. The API surfaces the three bans as clean errors but does not
+re-implement them: see [D29](#d29--project-and-kpi-write-rules--settled) and the fourth note under
+[D1](#d1--soft-or-hard-delete--settled).
 
 ### 4.8 `leaves` — from `leaves`
 
@@ -878,6 +908,18 @@ obligation**, with the foreign key as a backstop for any code path that does har
 > closed by the same decision: no hard-delete path will exist. See
 > [D28](#d28--payroll-write-rules--settled).
 
+> **Fourth note (projects and KPIs):** `projects` and `kpis` are soft-deleted in practice, so
+> "hard delete everywhere else" is stale for them too. Both have a `deleted_at` column and
+> partial indexes on `deleted_at IS NULL`, and `projectRepository.js` and `kpiRepository.js`
+> filter every query on it. `project_assignments` is the exception that D1's text got right: it
+> has no `deleted_at` and stays a hard-deleted join table. Because both parent tables are
+> soft-deleted, their `ON DELETE RESTRICT` foreign keys (`kpis.project_id`, the project's
+> team lead, an assignment's employee) are inert on the real deletion path, and
+> `project_assignments`' `ON DELETE CASCADE` on the project side never fires — so what those
+> constraints appear to guarantee is a service-layer obligation here, exactly as for
+> departments (D26). Both deletes record who did it. See
+> [D29](#d29--project-and-kpi-write-rules--settled).
+
 ### D2 — Rewrite `001` or add `002` — ✅ SETTLED
 **`001` has never been applied to any database; it is rewritten in place. There is no `002`.**
 Implemented: `001_initial_core_hr_hierarchy.up.sql` and `.down.sql` now match this document,
@@ -1325,3 +1367,131 @@ numbers. `pg` returns `numeric` as a string, and the frontend adds these values
 `Number(a) === Number(b)`, which is why the harness never showed it. `numeric(12,2)` has at most
 12 significant digits, which a double holds exactly. This is payroll-only: the same string
 behavior on `employees.basic` and `employees.allowances` is a known, separate fix.
+
+### D29 — Project and KPI write rules — ✅ SETTLED
+
+Decided before Phase 8 implementation. This replaces `manageProject` and `manageKpi`; the
+`getScopedWorkspace` read callable is already replaced by Phase 3's scoped reads. Everything here
+is a service-layer or API-layer rule unless it says otherwise. The three KPI bans — self-rating,
+legacy-KPI rating, and rating fields moving together — are database constraints (§4.7) and are
+**not** re-implemented in the service; the API only surfaces their violations as clean errors.
+
+**Who may write — the callables' policy, carried over.** The auth matrix's "denied" rows for
+`projects` and `kpis` describe the *rules* layer: client writes are blocked there because the
+callables write through the Admin SDK. The effective policy is `MANAGING_ROLES = {admin, hr,
+manager, tl}` in `projectMutationService.js` and `kpiMutationService.js`, each with scope, and that
+is what carries over. `getScopedWorkspace` was read-only and says nothing about writes.
+
+- `admin` and `hr`: any project and any KPI.
+- `manager`: a project whose department is their own, and the *resulting* project's department must
+  also be their own; a KPI whose project **and** employee are both in their department.
+- `tl`: an existing project in their department that they lead or that has any assignee who reports
+  to them. The *resulting* project — on create and on edit — must have them as its lead, be in their
+  department, and have **every** assignee on their team. A KPI needs the project in that scope and the
+  employee on their team.
+- `employee`: denied.
+
+Scope is checked against the existing project and against the resulting one, so a TL can manage a
+project they only partly touch but can never leave one that is not wholly theirs. This write scope is
+deliberately narrower than Phase 3's read scope (a TL reads KPIs of their members and themselves
+through the employee join; a manager reads every KPI in their department), so it needs its own
+write-scope predicate rather than reusing the read filters. That is intentional, not drift.
+
+**Assignments are managed through the project endpoints.** `assigned_employee_ids` is required, with
+at least one, on `POST /api/v1/projects`, and when supplied on `PATCH` it replaces the whole set
+atomically in one transaction. No duplicates. Each assignee must be an active `employee`-role person in
+the project's department (the database already forces the same department, through the composite
+foreign keys); a team lead must be an active `tl` in the same department. Separate assignment
+endpoints were rejected: "at least one assignee" would become a cross-request rule, and the
+frontend's single project form would have to change. A project's own department, lead and assignees
+stay editable under the two-sided scope check above.
+
+**A KPI's employee and project are frozen.** `PATCH /api/v1/kpis/:id` rejects `employee_id` and
+`project_id`, as `kpiMutationService.js` always did (both are protected fields); correcting an
+attribution is delete and re-create. A rating belongs to one employee on one project, so moving a KPI
+would transplant someone's evaluation. A two-sided re-attribution rule, as in D27, was considered and
+rejected for that reason.
+
+**Creating a KPI.** A project is required, so no new legacy (project-less) KPIs; legacy rows can only
+come from the import and can still be edited and deleted, but never rated. The KPI's employee must be
+active, `employee`-role, in the project's department and an assignee of it. That eligibility is
+checked at **create only**: later edits and ratings rely on scope and on the database. This departs
+from `kpiMutationService.js`, which re-verified it on every write and thereby left a KPI un-editable
+and un-deletable once its employee was unassigned or changed role. `status` stays `active` only (A1
+remains open).
+
+**Rating is its own operation: `POST /api/v1/kpis/:id/rating`.** The body is `{rating}` alone, an
+integer 1–10. The server sets `rated_by_employee_id` and `rated_at` — a client never says who rated or
+when. It is never combined with other fields. Re-rating overwrites and replaces the rater and time
+(there is no rating history); clearing a rating is refused. Project KPIs only. Who may rate is the
+KPI write scope above. The constraint violations surface as clean errors: self-rating as `403
+self_rating_denied`, a legacy KPI as `409 legacy_kpi_not_rateable`, an out-of-range value as `400`.
+`POST` was chosen over `PUT` so the CORS method list does not change. Because eligibility is checked
+at create only, self-rating is reachable through the API only after the employee's role has changed —
+a manager who was once an assigned employee — and the database then refuses it. That is how the
+"must fail at the database" check is exercised end to end.
+
+**Delete is soft, and records the deleter, for both.** `projects` and `kpis` each get
+`deleted_by_employee_id` alongside the existing `deleted_at`; see the fourth note after D1. This
+needs a **new migration `009`** (never an edit to `001`–`008`), written at implementation time, adding
+the column to both tables. As for `007` and `008`, the design points are left to the migration: the FK
+to `employees(id)` should be `ON DELETE SET NULL`, a `CHECK` should require `deleted_at IS NOT NULL`
+whenever the deleter is set, and a partial index should serve the `SET NULL` scan. `project_assignments`
+is untouched: its rows are hard-deleted join rows, and those of a soft-deleted project stay but are
+hidden with it. Hard delete was rejected: it is irreversible, loses recorded evaluations, and would
+leave `deleted_at` and the partial indexes as dead weight.
+
+**Deleting a project with live KPIs, or removing an assignee who has them, is refused.** Each returns
+`409` — `project_has_kpis` and `assignee_has_kpis` — carrying the count of *live* KPIs
+(`deleted_at IS NULL`); the caller moves or deletes the KPIs first. The same pattern as D26, and a
+service-layer obligation for the same reason: `ON DELETE RESTRICT` does not fire on a soft delete.
+Rejected: cascading the soft delete to the KPIs (it discards recorded ratings) and allowing it, as
+Firestore did, which stranded the KPIs.
+
+**Serialization.** KPI `target` and `current_value` (`numeric(14,2)`) are selected as `float8`, and
+project `start_date` and `due_date` as `YYYY-MM-DD` text, in the shared project and KPI column lists —
+so reads and write responses agree. These are the same two fixes made for payroll (D28) and attendance
+(D27): `pg` returns `numeric` as a string, which the frontend's arithmetic would concatenate, and a
+`date` as a `Date` at server-local midnight, which serialises a day early east of UTC.
+
+**Accepted defaults.** These were put forward with a recommendation and not among the questions
+explicitly answered. A project's status may move between any of `draft`, `active` and `completed`.
+Timestamps and the rater are server-set, and strict schemas reject unknown fields. KPI amounts are
+limited to two decimal places within `numeric(14,2)`. Wire names follow the database (`snake_case`),
+so a project carries `department_id` rather than Firestore's department name.
+
+**A new project's status defaults to `active`.** `POST /api/v1/projects` defaults `status` to
+`active`, not to the column's `draft`. The frontend project form defaults to `active`, so a project
+created through it landing silently in `draft` would be a behavior change nobody asked for, and
+parity with existing behavior is this decision's own principle. The column default stays `draft` and
+`001` is untouched; the API never consults it, because the repository inserts the status explicitly.
+An explicit `draft` is honored.
+
+**Scoped roles get defaults; an explicit value is checked, never overridden.** On project create, a
+`manager` or `tl` who omits `department_id` gets their own department, and a `tl` who omits
+`team_lead_id` gets themselves — the same defaulting as employee create, and what the frontend form
+does client-side. A value that is *present* is validated and scope-checked as given: a team lead who
+names another lead, or sends an explicit `null`, is refused (`403 project_scope_denied`), not quietly
+rewritten to themselves.
+
+**Known inconsistency, deliberately deferred: request and response casing.** A project request takes
+`assigned_employee_ids`, but a project in a response — a read or a write result — carries
+`assignedEmployeeIds`. That is the Phase 3 read shape, kept so the Firestore parity harness can
+compare it directly, and `parityService.js` and the existing read tests depend on it. Write responses
+reuse the read shape on purpose, so a project looks the same whether it was just written or fetched.
+It was noticed while building Phase 8 and left alone: unifying the two would change the Phase 3 read
+shape, which is its own task with its own blast radius, not a side effect of the write endpoints.
+A test pins the current shape, so changing it later has to be a deliberate act.
+
+### D30 — Employee deletion leaves project and KPI references behind
+
+`employeeRepository.deleteById` (Phase 4B) never touches projects, assignments or KPIs, and under
+soft delete the `ON DELETE RESTRICT` foreign keys that would otherwise stop it are inert (see the
+fourth note after D1). A soft-deleted employee therefore stays an assignee, or the team lead, of live
+projects, and keeps live KPIs. D16 and D15 handle only team-lead members and department managers.
+
+**Open — not decided here.** Phase 8's own writes accept live employees only, so they never *add*
+to the problem, but deleting an employee is employee-endpoint behavior and is left for a separate
+decision. The candidate shape is D15/D16-style handling inside the employee delete (remove the
+employee's assignments, null a project lead), noting that it can leave a project with zero
+assignees, which D29 forbids, and that their KPIs would still need a rule.
