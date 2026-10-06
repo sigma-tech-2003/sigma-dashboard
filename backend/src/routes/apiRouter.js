@@ -6,15 +6,18 @@ import { createAuthRouter } from "./authRoutes.js";
 import { createDepartmentRouter } from "./departmentRoutes.js";
 import { createEmployeeRouter } from "./employeeRoutes.js";
 import { healthRouter } from "./healthRoutes.js";
+import { createKpiRouter } from "./kpiRoutes.js";
 import { createPayrollRouter } from "./payrollRoutes.js";
+import { createProjectRouter } from "./projectRoutes.js";
 import { createResourceRouter } from "./resourceRoutes.js";
 
 // Read routes for all seven domains. Every entry becomes a `GET /<path>` and
 // `GET /<path>/:id` pair via createResourceRouter -- see
 // src/controllers/resourceController.js for why one factory serves all seven rather than
 // seven near-identical files. Writes land per domain as each phase reaches it; employees',
-// departments', attendance's and payroll's POST/PATCH/DELETE are mounted separately below, at the same
-// paths -- Express dispatches by method as well as path, so the two coexist.
+// departments', attendance's, payroll's, projects' and KPIs' POST/PATCH/DELETE (and the KPI rating
+// POST) are mounted separately below, at the same paths -- Express dispatches by method as well as
+// path, so the two coexist.
 const RESOURCE_ROUTES = [
   { path: "/employees", repositoryKey: "employeeRepository", resourceName: "employee" },
   { path: "/departments", repositoryKey: "departmentRepository", resourceName: "department" },
@@ -26,12 +29,13 @@ const RESOURCE_ROUTES = [
 ];
 
 /**
- * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object, employeeMutationService?: object, departmentMutationService?: object, attendanceMutationService?: object, payrollMutationService?: object, passwordSetService?: object }} [dependencies]
+ * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object, employeeMutationService?: object, departmentMutationService?: object, attendanceMutationService?: object, payrollMutationService?: object, projectMutationService?: object, kpiMutationService?: object, passwordSetService?: object }} [dependencies]
  *   `repositories` lets tests inject fakes keyed the same as the container
  *   (employeeRepository, departmentRepository, ...) without a database. `authService`,
  *   `employeeMutationService`, `departmentMutationService`, `attendanceMutationService`,
- *   `payrollMutationService` and `passwordSetService` let tests inject fake/differently-backed
- *   services for the routes mounted below.
+ *   `payrollMutationService`, `projectMutationService`, `kpiMutationService` and
+ *   `passwordSetService` let tests inject fake/differently-backed services for the routes mounted
+ *   below.
  */
 export function createApiRouter(dependencies = {}) {
   const router = Router();
@@ -74,6 +78,12 @@ export function createApiRouter(dependencies = {}) {
 
   const getPayrollMutationService = () => dependencies.payrollMutationService ?? getContainer().payrollMutationService;
   router.use("/payroll", createPayrollRouter(getPayrollMutationService));
+
+  const getProjectMutationService = () => dependencies.projectMutationService ?? getContainer().projectMutationService;
+  router.use("/projects", createProjectRouter(getProjectMutationService));
+
+  const getKpiMutationService = () => dependencies.kpiMutationService ?? getContainer().kpiMutationService;
+  router.use("/kpis", createKpiRouter(getKpiMutationService));
 
   return router;
 }

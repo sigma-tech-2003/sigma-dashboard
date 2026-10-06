@@ -15,7 +15,9 @@ import { createAuthService } from "./services/authService.js";
 import { createDepartmentMutationService } from "./services/departmentMutationService.js";
 import { createEmployeeMutationService } from "./services/employeeMutationService.js";
 import { createPasswordSetService } from "./services/passwordSetService.js";
+import { createKpiMutationService } from "./services/kpiMutationService.js";
 import { createPayrollMutationService } from "./services/payrollMutationService.js";
+import { createProjectMutationService } from "./services/projectMutationService.js";
 
 /**
  * Composition root. Built lazily on first use so that importing the app -- for tests, or
@@ -33,6 +35,8 @@ export function getContainer() {
     const departmentRepository = createDepartmentRepository(database);
     const attendanceRepository = createAttendanceRepository(database);
     const payrollRepository = createPayrollRepository(database);
+    const projectRepository = createProjectRepository(database);
+    const kpiRepository = createKpiRepository(database);
     const passwordSetTokenRepository = createPasswordSetTokenRepository(database);
     const passwordSetService = createPasswordSetService({
       passwordSetTokenRepository,
@@ -47,8 +51,8 @@ export function getContainer() {
       employeeRepository,
       passwordSetTokenRepository,
       departmentRepository,
-      projectRepository: createProjectRepository(database),
-      kpiRepository: createKpiRepository(database),
+      projectRepository,
+      kpiRepository,
       leaveRepository: createLeaveRepository(database),
       attendanceRepository,
       payrollRepository,
@@ -66,6 +70,8 @@ export function getContainer() {
         timeZone: getCompanyTimezone(),
       }),
       payrollMutationService: createPayrollMutationService({ payrollRepository, employeeRepository }),
+      projectMutationService: createProjectMutationService({ projectRepository, employeeRepository }),
+      kpiMutationService: createKpiMutationService({ kpiRepository, projectRepository, employeeRepository }),
     });
   }
   return container;
