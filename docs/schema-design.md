@@ -446,6 +446,9 @@ CREATE TABLE leaves (
   created_at              timestamptz NOT NULL DEFAULT now(),
   updated_at              timestamptz NOT NULL DEFAULT now(),
   deleted_at              timestamptz,
+  -- Who soft-deleted the row (D31). Added by migration 010, not 001; ON DELETE SET NULL so
+  -- an audit pointer never blocks hard-deleting an employee.
+  deleted_by_employee_id  uuid REFERENCES employees(id) ON DELETE SET NULL,
 
   CONSTRAINT leaves_dates_ordered   CHECK (end_date >= start_date),
   CONSTRAINT leaves_reason_not_blank CHECK (length(btrim(reason)) > 0),
@@ -459,12 +462,22 @@ CREATE TABLE leaves (
   CONSTRAINT leaves_decision_consistent CHECK (
     (status = 'pending'  AND decided_by_employee_id IS NULL AND decided_at IS NULL) OR
     (status <> 'pending' AND decided_by_employee_id IS NOT NULL AND decided_at IS NOT NULL)
-  )
+  ),
+
+  -- A deleter may only be recorded on a row that is actually deleted (010).
+  CONSTRAINT leaves_deleted_by_requires_deleted_at
+    CHECK (deleted_by_employee_id IS NULL OR deleted_at IS NOT NULL)
 );
 
 CREATE INDEX leaves_employee_status_index ON leaves (employee_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX leaves_date_range_index      ON leaves (start_date, end_date) WHERE deleted_at IS NULL;
+-- Serves the ON DELETE SET NULL scan above (010).
+CREATE INDEX leaves_deleted_by_index
+  ON leaves (deleted_by_employee_id) WHERE deleted_by_employee_id IS NOT NULL;
 ```
+
+(The `leaves_decision_consistent` shown above is `001`'s; `003` widens it, as the amendment below
+describes. `deleted_by_employee_id` and its `CHECK` and index are `010`'s.)
 
 **`days` is a generated column, not a stored value.** `firestore.rules:406-411` requires
 `days == (end - start)/86400000 + 1` and rejects the write otherwise. Postgres computes it,
@@ -516,6 +529,14 @@ Verified end-to-end against `sigma_hrm_scratch`: an imported approved leave land
 preserved as `'approved'`; a *new* row inserted directly with `decision_recorded` left at
 its default `true` and no approver is still rejected by the constraint, proving the
 relaxation is scoped to imported rows only.
+
+#### Amendment (Phase 9, migration `010_leave_deleted_by_and_usage_view`)
+
+`leaves` is soft-deleted, and the delete records who did it in `deleted_by_employee_id`; the block
+above shows the table as it stands after migration `010`, which added that column, its `CHECK` and
+its index to the `001` definition. See the fifth note under
+[D1](#d1--soft-or-hard-delete--settled) and [D31](#d31--leave-write-rules-and-entitlement--settled).
+`010` also replaced the `employee_leave_usage` view, described under [§4.12](#412-leavebalances--dropped).
 
 ### 4.9 `attendance` — from `attendance`
 
@@ -667,20 +688,36 @@ Per decision, balances are computed. A view replaces the collection:
 
 ```sql
 CREATE VIEW employee_leave_usage AS
-SELECT employee_id,
-       type,
-       date_part('year', start_date)::int AS leave_year,
-       sum(days) AS days_used
+SELECT leaves.employee_id,
+       leaves.type,
+       date_part('year', leave_dates.leave_date)::int  AS usage_year,
+       date_part('month', leave_dates.leave_date)::int AS usage_month,
+       (count(*) FILTER (WHERE leaves.status = 'approved'))::int AS days_approved,
+       (count(*) FILTER (WHERE leaves.status = 'pending'))::int  AS days_pending
 FROM leaves
-WHERE status = 'approved' AND deleted_at IS NULL
-GROUP BY employee_id, type, date_part('year', start_date);
+CROSS JOIN LATERAL generate_series(
+  leaves.start_date::timestamp, leaves.end_date::timestamp, interval '1 day'
+) AS leave_dates(leave_date)
+WHERE leaves.status IN ('approved', 'pending') AND leaves.deleted_at IS NULL
+GROUP BY 1, 2, 3, 4;
 ```
 
-This computes **usage** only. Entitlement — the `t` in Firestore's `{t,u,r}` — has no
-authoritative source anywhere in the repo; the only values are mock data in
-`src/data/leaveBalance.js` (Annual 15, Sick 10, Casual 5). The remaining balance
-`r = t - u` cannot be computed until entitlement is defined. See
-[§9 D4](#d4--where-do-leave-entitlements-come-from) — **this blocks the leave domain.**
+This is the view as it stands after migration `010`, which replaced `001`'s. The original
+grouped by *year and type* and attributed a whole leave to its start year; it could not express
+management's entitlement ([§9 D4](#d4--where-do-leave-entitlements-come-from)): a monthly pool that
+resets, a December bonus, and a yearly pool shared by two types. This one splits every leave **per
+calendar day** and charges each day to the month it falls in (D5), so a leave from 30 January to
+2 February is 2 days of January and 2 of February.
+
+It is deliberately a pure **usage** fact. It knows nothing of pools, allowances, or which leave
+type draws on which pool: the type-to-pool map and the entitlement numbers live in one code
+module, `src/services/leaveEntitlements.js`, so a change to management's rules is a change to that
+module and not a view rewrite. Only approved and pending leaves count (a pending request reserves
+its days) and rejected and soft-deleted ones never do; the two statuses are separate columns so a
+caller can show them apart. The balance itself — entitlement minus usage — is computed from this view
+and that module, and served at `GET /api/v1/leave-balances`; see
+[D31](#d31--leave-write-rules-and-entitlement--settled). The old view's columns (`leave_year`,
+`days_used`) are gone; nothing in the code base read them.
 
 Note this also resolves ambiguity A2 by decision: balances were stale because nothing
 decremented them. Deriving from `leaves` makes staleness structurally impossible.
@@ -920,6 +957,15 @@ obligation**, with the foreign key as a backstop for any code path that does har
 > departments (D26). Both deletes record who did it. See
 > [D29](#d29--project-and-kpi-write-rules--settled).
 
+> **Fifth note (leaves):** like `payroll`, `leaves` needed no soft/hard correction: D1's "soft
+> delete for `leaves`" is accurate. It has a `deleted_at` column, its indexes are partial on
+> `deleted_at IS NULL`, and both `employee_leave_usage` and `leaveRepository.js` filter on it.
+> Two things were missing. Firestore never allowed *any* delete of a leave
+> (`allow delete: if false`), so a mistaken request could only ever be rejected; and there is
+> no record of who deleted a row. [D31](#d31--leave-write-rules-and-entitlement--settled) adds the
+> deleter and settles who may delete, which also answers §8 item 7 (a deleted leave never counts
+> against a balance).
+
 ### D2 — Rewrite `001` or add `002` — ✅ SETTLED
 **`001` has never been applied to any database; it is rewritten in place. There is no `002`.**
 Implemented: `001_initial_core_hr_hierarchy.up.sql` and `.down.sql` now match this document,
@@ -946,9 +992,33 @@ Does it reset on a calendar or fiscal year? Does unused entitlement carry over? 
 the entire leave domain** — without it `r = t − u` cannot be computed and the leave UI cannot
 render.
 
+**✅ SETTLED (Phase 9) — management's entitlement rules.** As relayed by the project owner on
+2026-10-07, and recorded here as given:
+- Every employee gets **2 leaves per month**. They do **not** carry forward: each month starts
+  fresh at 2.
+- Separately, the company grants **10 leaves in December** as a year-end (Christmas) benefit, **on
+  top of** the monthly 2. An employee who joined mid-year still gets them.
+- Separately again, **14 leaves per year** are available for Hajj, Umrah, illness or similar
+  serious need. They are granted **annually, not once in a lifetime**, and are **not gated behind
+  strict proof**.
+
+So entitlement is a global rule, not per role or per employee, and these three pools replace the
+mock values in `src/data/leaveBalance.js` (Annual 15, Sick 10, Casual 5), which are superseded.
+How the pools map onto the five leave types, and how a balance is computed from them, is
+[D31](#d31--leave-write-rules-and-entitlement--settled). (This heading keeps its original text so
+the existing links to it from `migration-plan.md` still resolve.)
+
 ### D5 — Does an approved leave in a prior year still count?
 `employee_leave_usage` groups by `date_part('year', start_date)`. A leave spanning a year
 boundary is attributed entirely to its start year. Confirm, or specify proration.
+
+**✅ SETTLED (Phase 9) — split by calendar day, not attributed to the start.** With a pool that
+resets every month, attributing a whole leave to its start would be wrong in both directions: a
+four-day leave from 30 January to 2 February would charge all four days to January's 2. A leave is
+therefore split **per calendar day across the months it covers**, each day charged to the month it
+falls in, and to the calendar year it falls in for the 14-per-year pool. This replaces the view's
+start-year attribution. See [D31](#d31--leave-write-rules-and-entitlement--settled). (This heading
+keeps its original text so the existing links to it still resolve.)
 
 ### D6 — `role` on `users` rather than `employees`
 Firestore keeps role on the employee document. I put it on `users` (§4.2 rationale). Confirm.
@@ -972,6 +1042,13 @@ Firestore bans self-approval **only for TLs** (`firestore.rules:358`); admin, HR
 are not blocked. `leaves_no_self_approval` blocks everyone, because a `CHECK` cannot see the
 approver's role. Confirm the broader rule is acceptable — I believe it is desirable, but it is
 a change. If admins must self-approve, this moves to the service layer and weakens.
+
+**✅ SETTLED (Phase 9) — the broader rule stands.** No role may decide its own request:
+`leaves_no_self_approval` stays a database constraint covering everyone. This matters now that every
+role may apply (D12): an admin's, hr's or manager's own request has to be decided by someone else. The
+consequence to keep in view is that an **admin's request needs another admin or an hr** to approve it,
+so an organisation with a single admin and no hr cannot get that admin's leave approved. See
+[D31](#d31--leave-write-rules-and-entitlement--settled).
 
 ### D9 — Attendance uniqueness — ✅ SETTLED
 `attendance_employee_date_unique` is new; Firestore allows unlimited rows per employee per
@@ -1013,6 +1090,12 @@ either reset their password at cutover, or run dual auth during transition. This
 `canCreateLeave` requires `isEmployee()` (`firestore.rules:421`), so an admin, HR, manager or
 TL applying for their own leave is denied today — while the UI offers it to everyone
 (ambiguity A10). Should the new API keep that restriction or allow all roles to apply?
+
+**✅ SETTLED (Phase 9) — every role may apply, for themselves only.** "Every employee gets 2 leaves
+per month" is read as every person in the `employees` table, whatever their role. Nobody applies for
+someone else, and the request's employee is never client-supplied. The frontend currently shows the
+Apply button only to employee-role users, so the API is broader than the UI until the frontend adds it
+for the other roles. See [D31](#d31--leave-write-rules-and-entitlement--settled).
 
 ### D13 — Deletion authority: managers deleting managers
 The decision states a manager may delete "tls and employees within their own department". I
@@ -1208,6 +1291,7 @@ response) delivered by an actual email send, and this decision should be revisit
 than assumed permanent. A future reader finding this code should not conclude that returning
 raw credentials in API responses is this codebase's general pattern — it is a deliberate,
 narrow exception made for exactly one flow, for exactly this reason.
+
 
 ### D26 — Deleting a department that still has employees in it — ✅ SETTLED
 
@@ -1495,3 +1579,95 @@ to the problem, but deleting an employee is employee-endpoint behavior and is le
 decision. The candidate shape is D15/D16-style handling inside the employee delete (remove the
 employee's assignments, null a project lead), noting that it can leave a project with zero
 assignees, which D29 forbids, and that their KPIs would still need a rule.
+
+### D31 — Leave write rules and entitlement — ✅ SETTLED
+
+Decided before Phase 9 implementation. It answers D4 with management's entitlement rules, and settles
+D5, D8 and D12 along the way. Everything here is a service-layer or API-layer rule unless it says
+otherwise. `days` stays a generated column and is never accepted from a client.
+
+**The three pools and the five leave types.** The UI offers five types (`Annual`, `Sick`, `Casual`,
+`Maternity`, `Emergency`) and the enum keeps all five, so the frontend and the database vocabulary are
+unchanged. Management's pools do not line up with them one to one, so a **fixed type-to-pool map**,
+kept in a single code module, decides which pool a request draws on:
+
+| Leave type | Draws on | Allowance |
+|---|---|---|
+| `Annual`, `Casual` | the **monthly pool** | 2 per calendar month; **12 in December** (2 + the Christmas 10) |
+| `Sick`, `Emergency` | the **serious-need pool** | 14 per calendar year |
+| `Maternity` | **no pool** | uncapped — see the open item below |
+
+Hajj and Umrah are applied for as `Emergency`, which is what "or similar serious need" covers. New
+enum values for them were rejected: they would be invisible in the UI until the frontend changed, and
+having the employee pick a pool would need a field the UI does not have. The allowance numbers and the
+map live in that one code module, not in a table; moving them to a table is a later change if
+management wants them editable.
+
+**The rules behind the numbers.**
+- The monthly 2 **does not carry forward**: every calendar month starts fresh.
+- The Christmas 10 are **usable only in December** and expire on 31 December, so December's allowance
+  is 12. They are not a pool that outlives the month.
+- The 14 are **granted per calendar year**, not once in a lifetime, and carry no proof requirement:
+  there is no attachment or evidence field.
+- **No proration anywhere.** The monthly 2 applies for every month an employee is employed, the full 14
+  for every calendar year they are employed, and the full 10 however late in the year they joined.
+  Months before the month containing `joined_on` carry no entitlement.
+
+**How a balance is computed.** A balance is derived from `leaves` at read time, never stored.
+- **Days are calendar days, inclusive**, which is what the generated `days` column already holds. A
+  leave that spans a weekend therefore consumes the weekend days too. **Recorded as decided pending
+  confirmation from management**, because "2 leaves a month" reads naturally as working days; counting
+  working days would need a company weekend and public-holiday configuration that does not exist
+  anywhere in the repository.
+- **A leave is split per calendar day across the months it covers** (D5), each day charged to the month
+  it falls in, and to its calendar year for the serious-need pool.
+- **Usage is approved plus pending**: a pending request reserves its days, so requests cannot be
+  stacked past the allowance. Rejected, deleted and cancelled leaves never count (§8 item 7), and a
+  legacy imported leave counts by its status like any other.
+- The existing `employee_leave_usage` view cannot express any of this and will be replaced by a
+  migration (see the note under §4.12).
+
+**Who may apply, and who may decide.**
+- **Every role may apply, for themselves only** (D12). The request's employee is always the acting
+  principal, never client-supplied.
+- Approval scopes are carried over from Firestore: `admin` and `hr` any request, a `manager` their
+  department, a `tl` their team. **Nobody decides their own** (D8), enforced by
+  `leaves_no_self_approval`. A decided request is immutable, as in Firestore.
+- Approval does not change usage (pending already counted), so there is **no balance re-check at
+  approval**; a rejection simply frees the days. There is no rejection reason. A decision made through
+  the API always records who and when (`decision_recorded = true`, migration 003); only the importer's
+  pre-existing decisions are `false`.
+
+**Cancelling and deleting.** An employee may **cancel their own pending request** — a soft delete that
+records who did it — but may not edit it: editing is cancel and re-apply, so the request an approver
+saw is the one that gets approved, and a decided request cannot be cancelled by its employee. `admin`
+and `hr` may delete a leave in **any status**, as the correction path for a mistaken approval.
+Delete is **soft** and records the deleter in a new `deleted_by_employee_id`, which needs a **new
+migration `010`** (never an edit to `001`–`009`), written at implementation time. As for `007`–`009`,
+the design points are left to the migration: the FK to `employees(id)` should be `ON DELETE SET NULL`,
+a `CHECK` should require `deleted_at IS NOT NULL` whenever the deleter is set, and a partial index
+should serve the `SET NULL` scan. There is no hard-delete path.
+
+**Checks added at write time.** Firestore had none of these.
+- A request that would exceed the balance is refused with a `409`, counting approved and pending, and
+  serialised per employee against concurrent applies. `Maternity` is exempt (outside the pools).
+- A request that overlaps the same employee's own pending or approved leave is refused with a `409`,
+  since the two would charge the same days twice.
+- **Backdating is allowed** and no future limit applies, as in Firestore: sick leave is often filed
+  after the fact, so a start date in the past is deliberately not refused.
+
+**Who may read a balance.** The employee, plus approvers within the scope they can already read leaves
+for (`admin`/`hr` any, `manager` their department, `tl` their team). That is a widening — Firestore let
+only the employee read their own balance and denied `admin` and `hr` — but an approver needs the number
+to decide.
+
+**Defaults, not among the questions explicitly answered.** `applied_on` is set by the server to today
+in the company timezone. `start_date`, `end_date` and `applied_on` are returned as `YYYY-MM-DD` text,
+the same date fix made for attendance, payroll and projects. The request carries the type, the two
+dates and the reason; nothing else is accepted.
+
+**Open items.**
+- **Maternity** is outside the pools and uncapped as an **interim**, because none of management's three
+  rules mentions it, in the same spirit as D25. Management needs to supply a figure; until then a
+  maternity request is approval-gated and nothing more.
+- **Working-day counting** is recorded as calendar days pending management's confirmation, as above.
