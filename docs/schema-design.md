@@ -1292,6 +1292,10 @@ than assumed permanent. A future reader finding this code should not conclude th
 raw credentials in API responses is this codebase's general pattern — it is a deliberate,
 narrow exception made for exactly one flow, for exactly this reason.
 
+> **Revisit opened (2026-10-07):** reading the frontend for its cutover showed it is built around
+> an emailed link (`sendEmployeePasswordSetupEmail`, a "Resend" button) and has no route to
+> receive a token. This decision stands unchanged; how the frontend should handle it is open as
+> [D34](#d34--delivering-the-password-setup-link-builds-on-d25).
 
 ### D26 — Deleting a department that still has employees in it — ✅ SETTLED
 
@@ -1671,3 +1675,272 @@ dates and the reason; nothing else is accepted.
   rules mentions it, in the same spirit as D25. Management needs to supply a figure; until then a
   maternity request is approval-gated and nothing more.
 - **Working-day counting** is recorded as calendar days pending management's confirmation, as above.
+
+---
+
+### Frontend cutover gaps (D32–D39) — all open
+
+Found 2026-10-07 by reading the frontend end to end for [Phase 10](migration-plan.md#phase-10--frontend-cutover)
+(the frontend cutover, a phase added at the same time). Each is a place where what the API
+provides and what the React app needs do not meet. **None is decided here.** Every entry gives
+what was found, the realistic options, and a recommendation, and every recommendation is exactly
+that — a proposal for you to accept, change or reject. Nothing below has been implemented.
+
+### D32 — Session restore and the frontend's own profile
+
+**Open — not decided here.**
+
+**What was found.** `POST /auth/login` and `POST /auth/refresh` return a `principal` of
+`{ userId, employeeId, role, departmentId }` (`userRepository.findPrincipalByUserId`). The
+frontend's session object is `{ employee: { id, name, email, phone, dept, pos, joinDate, empId,
+role }, linkage: "uid" }`; `authSessionService.js` rejects anything with a different field set,
+and `App.jsx` will not render the workspace unless `dept` is a string (separately, a manager's
+read plan in `useFirestore.js` and `useScopedWorkspace.js` need it non-empty). `departmentId` is a UUID, not the department name the app keys on. There is no
+`GET /auth/me`, and Firebase's `onAuthStateChanged` has no counterpart: the only way to restore a
+session on page load is `POST /auth/refresh` with the httpOnly cookie, which returns the
+principal above and none of the profile.
+
+**Options.**
+- **A. Widen the login/refresh principal** with the profile fields. One round trip at boot, but
+  it ties an authentication response to the UI's field set, and the same object shape is what the
+  middleware builds on every request.
+- **B. Add `GET /auth/me`** (bearer-authenticated) returning the profile. Leaves the principal
+  minimal, can be re-fetched after the user edits their own record, and is the one place the
+  frontend's session shape is produced. Costs a second request at boot.
+- **C. No backend change:** after refresh, the frontend reads its own row from
+  `GET /employees/:id`. Self-scope already allows that. It needs the department name
+  ([D33](#d33--department-names-for-manager-tl-and-employee)) and the shape translation
+  ([D39](#d39--response-shape-and-leave-balance-presentation)) to be settled first, and it makes
+  the session depend on the shape of a general-purpose read.
+
+**Recommendation (not settled): B.** It keeps the security object small and gives the profile a
+single source. A is the shortcut with the most coupling; C is only viable once D33 and D39 are
+decided.
+
+### D33 — Department names for manager, tl and employee
+
+**Open — not decided here.**
+
+**What was found.** `GET /departments` and `GET /departments/:id` are readable by `admin` and
+`hr` only (`departmentRepository` returns nothing for any other role — Phase 5's decision).
+Employee and project rows carry `department_id` and no name. The frontend identifies a department
+by **name**: employees have a `dept` string, projects a `department` string, a manager's read
+plan is `where dept == <name>`, and `DepartmentsPage` counts employees with `e.dept === name`;
+`.dept` appears 51 times in `src/` outside `src/firebase/` and `src/services/`. Firestore stored
+the name denormalised on every employee document, so every role had it for free. Under the API a
+manager, tl or employee has no way to turn their own `department_id` into the string the app
+requires, and a non-admin writer (a manager creating a project) has no way to turn a name back
+into an id.
+
+**Options.**
+- **A. Return the name with the id** — add `department_name` (beside `department_id`) to employee
+  and project reads and to whatever D32 settles on. A join, no new permission: a caller learns
+  only the names of departments whose rows they can already see. Writers get the id from the
+  rows they already hold.
+- **B. Widen `GET /departments`** so every role may read the department they belong to (id and
+  name). A scope change to Phase 5's "admin and hr only" decision, but it also serves any page
+  that needs a department's description or status.
+- **C. Let every role read every department's name and id.** Simplest to build; reveals the whole
+  organisation structure to employees, which Firestore did not do.
+- **D. Change the pages to work in ids.** Honest, but it rewrites 51 usages and the manager
+  read plan, against the frozen-UI rule in `AGENTS.md` §1.
+
+**Recommendation (not settled): A**, returning both id and name. It needs no permission change
+and no page change. B is the fallback if a page turns out to need more than the name.
+
+### D34 — Delivering the password-setup link (builds on D25)
+
+**Open — not decided here.** This revisits [D25](#d25--set-password-token-delivery-for-invited-employees--settled-interim),
+which said it should be revisited once an email path or a frontend route exists.
+
+**What was found.** D25 settled an interim: the token is returned once, to the admin or hr who
+issues it (`POST /employees/:id/password-token`), to be relayed out of band, and redeemed with
+`POST /auth/set-password`. Nothing has changed on the backend: there is **no email transport**
+(no mail library in `backend/package.json` or `backend/src`). The frontend, meanwhile, is built
+for email. `EmployeesPage.save` calls `inviteEmployee` and then
+`sendEmployeePasswordSetupEmail` (Firebase's `sendPasswordResetEmail`), reports "password-setup
+email sent", and offers a **Resend** button; the module has no replacement. The app also has
+**no route that could receive a token** — its routes are hash routes inside the authenticated
+shell, and the login page has no forgot-password flow.
+
+**Options.**
+- **A. Stay with D25's interim.** After creating an employee the admin/hr UI requests a token and
+  shows a copyable link once; resend means issuing a new token. Add an unauthenticated
+  set-password route to the app that calls `POST /auth/set-password`. No new infrastructure. The
+  "email sent" wording in the UI becomes untrue and has to change — a UI-text departure from
+  `AGENTS.md` §1 that D20-style handling would have to cover.
+- **B. Add real email delivery** (a mail provider, credentials, deliverability, a link template)
+  and keep the app's wording. Still needs the set-password route, so it is strictly more work
+  than A and also the end state D25 pointed at.
+- **C. Do nothing for now.** Not viable: an employee created through the API cannot log in until
+  they have a password.
+
+**Recommendation (not settled): A for the cutover**, with the set-password route built as part of
+the frontend phase, and email delivery (B) taken as its own later decision. A is what D25 was
+designed to allow. A self-service "forgot password" is a separate gap: the backend has no
+endpoint for it.
+
+### D35 — Employee status on create
+
+**Open — not decided here.**
+
+**What was found.** The employee form lets the admin create an employee as `active` or
+`inactive`; the `inactive` path is handled in `EmployeesPage` ("Inactive employee account created
+in a disabled state. No password-setup email was sent."), and `inviteEmployee`'s field list
+includes `status`. `employeeCreateSchema` is strict and has **no status field**, so such a request
+is rejected; every employee created through the API starts as `users.status = 'invited'`. Update
+does accept `employment_status`. There are two enums involved (`users.status`: `active`,
+`inactive`, `invited`, `suspended`; `employees.employment_status`: `active`, `inactive`,
+`on_leave`, `terminated`), and `auth-matrix.md` already noted that no mapping between them is
+defined. A principal is only resolved for a user who is `active` with an `active` employment
+status.
+
+**Options.**
+- **A. Accept an optional `employment_status` (`active` or `inactive`) on create.** Matches the
+  form. Needs a rule for what `users.status` is when an employee is created inactive (an
+  `inactive` account must not be able to receive a usable token).
+- **B. Remove "inactive" from the create form** — create is always active, deactivate afterwards
+  with a PATCH. Simpler backend, but a UI behaviour change.
+- **C. Create, then immediately PATCH to inactive** from the frontend. Two calls, not atomic, with
+  a window in which the account is live.
+
+**Recommendation (not settled): A**, with the `users.status` rule decided inside it. C is the
+option to avoid.
+
+### D36 — Production cookie topology
+
+**Open — not decided here.**
+
+**What was found.** The refresh token travels only as an httpOnly cookie, `SameSite=Strict`,
+`Path=/api/v1/auth`, `Secure` in production (`authController.js`). A `Strict` cookie is sent only
+on **same-site** requests — same registrable domain, ports ignored. In development
+`localhost:5173` calling `localhost:<api port>` is same-site, so it works. In production the
+frontend is on Vercel (`main` auto-deploys) and **nothing in this repository records where the API
+will run**; if it is on a different registrable domain, the browser never sends the cookie and
+refresh never works. CORS is configured for credentials with an origin allow-list
+(`CORS_ALLOWED_ORIGINS`), but `vite.config.js` has no dev proxy, and there is no API base URL
+setting in the frontend: its only environment variables are `VITE_FIREBASE_*`.
+
+**Options.**
+- **A. Same-site deployment** — frontend and API on subdomains of one registrable domain. `Strict`
+  keeps working; CORS with credentials stays required.
+- **B. Same-origin via a rewrite or proxy** — the frontend host forwards `/api/*` to the API, so
+  the browser sees one origin. `Strict` keeps working, CORS is not needed, and the frontend can
+  use a relative base URL.
+- **C. Relax to `SameSite=None; Secure`** so the cookie crosses sites. Weakens the CSRF stance the
+  controller deliberately chose, and browsers increasingly block third-party cookies, so it is
+  unreliable as well.
+- **D. Keep the refresh token in JavaScript-readable storage.** Contradicts the XSS reasoning
+  recorded in `authController.js`.
+
+**Recommendation (not settled): keep `Strict`; prefer B, or A if the API cannot be fronted.** C and
+D both undo a security choice already made. This needs the deployment facts — which host, which
+domain — that are not in the repository, so it cannot be settled from the code alone.
+
+### D37 — The role selector (`ROLE_MISMATCH`)
+
+**Open — not decided here.** `migration-plan.md` Phase 4 already left this as "preserved or
+deliberately dropped".
+
+**What was found.** The login page makes the user pick a role. The Firebase flow stores the
+choice in `sessionStorage`, passes it to the `verifyAuthSession` callable on every session
+establishment, and the callable refuses a mismatch (`ROLE_MISMATCH`,
+`authSessionVerificationService.js:369-375`, `auth-matrix.md`), after which the app signs the
+user out and shows "These credentials do not belong to the selected role." `POST /auth/login`
+accepts only `{ email, password }`, and the returned principal carries the stored role. The
+selector is not an authorization control — authority comes from the stored role, server-side — it
+guards against signing in as the wrong persona.
+
+**Options.**
+- **A. Check on the client.** After login compare `principal.role` with the selection; on a
+  mismatch call logout and show the existing message. No backend change, the wording is
+  preserved, and nothing is revealed that a correct login would not show the user anyway. A
+  session is briefly created and then revoked.
+- **B. Check in the backend:** accept an optional `selected_role` on login and refuse a mismatch
+  before issuing tokens. No session is created, but the refusal must either use the generic
+  login error (losing the specific message) or a distinct one (telling someone who has guessed
+  valid credentials that the role was the only thing wrong).
+- **C. Drop the selector.** Simplest login; a visible UI change against `AGENTS.md` §1.
+
+**Recommendation (not settled): A.** The selector is not a security boundary, so a client check
+preserves the behaviour at no cost to the backend. It should not later be mistaken for one.
+
+### D38 — Payroll tax: client preview vs the database
+
+**Open — not decided here.**
+
+**What was found.** `PayrollPage` computes `Math.round(calcTax(gross))` (`src/utils/helpers.js`)
+for a preview and today also **sends** `tax` and `net` on create. The API's strict schema rejects
+`gross`, `tax` and `net`: they are generated columns (D7, D28), computed by `payroll_tax_for()`.
+So the client figures become preview-only. By reading, the two use the same brackets — 0 to
+50,000; 5% to 100,000; 2,500 + 10% to 200,000; 12,500 + 15% beyond — and `payrollTax.test.js`
+proves the **database function** against `firestore.rules`. **No test anywhere compares
+`calcTax` to the database function** (`calcTax` is referenced only by `PayrollPage.jsx` and its
+own definition). Possible differences, found by reading and **not tested**:
+1. `calcTax` works in binary floating point, where `(gross - 50000) * 0.05` can land just below
+   an exact half that the database's `numeric` arithmetic sees as exactly `.5`, so the rounded
+   tax could differ by 1.
+2. The client's gross comes from JavaScript numbers; the database's from `numeric(12,2)`.
+3. **Employee `basic` and `allowances` reach the client as strings** (`numeric` selected without a
+   cast; D28 calls this a "known, separate fix"), so `emp.basic + emp.allowances + +form.bonus`
+   (`PayrollPage.jsx:26`) concatenates before it adds. This one is certain, and the preview does
+   not work at all until it is fixed.
+
+**Options.**
+- **A. Keep the client preview**, fix the employee money columns (cast to `float8`, as payroll's
+  already are), add a parity test between `calcTax` and `payroll_tax_for()` across every bracket
+  boundary and a range of cents, and show the server's `tax` and `net` from the create response
+  once saved.
+- **B. Remove the client calculation:** the preview asks the server (a dry-run endpoint that does
+  not exist). One source of truth, at the cost of a new endpoint and a round trip per keystroke
+  or button.
+- **C. Show only gross in the preview** and "tax and net calculated on save". Simplest; a visible
+  UI change.
+
+**Recommendation (not settled): A**, with the employee money-column fix treated as a prerequisite.
+Whatever is chosen, the saved record's figures come from the database, never from the form.
+
+### D39 — Response shape and leave-balance presentation
+
+**Open — not decided here.** *Not on the list of gaps you asked me to record; added because the
+other entries and Phase 10 depend on it.*
+
+**What was found.** The read endpoints return relational snake_case rows. The pages consume
+Firestore-shaped documents. The only field already shaped for the frontend is a project's
+`assignedEmployeeIds`.
+
+| Domain | Frontend field | API field |
+|---|---|---|
+| employees | `name`, `pos`, `dept`, `joinDate`, `empId`, `status`, `teamLeadId` | `full_name`, `position_title`, `department_id`, `joined_on`, `employee_number`, `employment_status`, `team_lead_id` |
+| attendance | `empId`, `date`, `checkIn`, `checkOut` | `employee_id`, `work_date`, `check_in`, `check_out` |
+| leaves | `empId`, `start`, `end`, `applied` | `employee_id`, `start_date`, `end_date`, `applied_on` |
+| payroll | `empId`, `month` (an English name), `year` | `employee_id`, `period_month` (1–12), `period_year` |
+| kpis | `empId`, `projectId`, `current`, `ratedBy`, `ratedAt` | `employee_id`, `project_id`, `current_value`, `rated_by_employee_id`, `rated_at` |
+| projects | `department`, `teamLeadId`, `startDate`, `dueDate` | `department_id`, `team_lead_id`, `start_date`, `due_date` |
+| departments | `status: "Active"`, `managerId` | `status: "active"`, `manager_employee_id` |
+
+Ids are UUIDs where the app was built for numeric strings, and the pages generate their own ids
+(`id: Date.now()`), which the strict write schemas reject. One consequence is already known:
+`PayrollPage.jsx:24` and `:46` use `e.id === +selEmp`, which is `NaN` for a UUID — see
+[Phase 10's known hazards](migration-plan.md#phase-10--frontend-cutover), which also records
+that the search which found it covered **one family of patterns only**, so there may be more.
+The **leave balance** differs in kind: the pages read `leaveBalances[user.id]` as per-type
+`{ t, u, r }` cards (`LeavePage.jsx`, `Dashboard.jsx`); `GET /leave-balances` returns two pools
+and a type-to-pool map (D31), with Maternity on none.
+
+**Options.**
+- **A. Translate in the frontend.** Each new service module owns a mapper in both directions, so
+  pages keep seeing the shape they know and the backend stays relational and snake_case on both
+  reads and writes.
+- **B. Make the backend return the Firestore shape** (as it already does for `assignedEmployeeIds`).
+  Pages are untouched, but legacy field names enter the API and reads stop matching writes.
+- **C. Change the pages to the API's shape.** The honest long-term shape, and the largest change,
+  against `AGENTS.md` §1 during the migration.
+
+For the balance cards, A needs a deliberate choice about what a per-type card now means (Annual
+and Casual draw on one shared pool; Sick and Emergency on another; Maternity on none). Any
+mapping is a visible change to what the cards say.
+
+**Recommendation (not settled): A.** It matches the migration plan's own intent that pages stay
+as they are. How the balance cards should read is a product question for you, not a mapping
+detail.

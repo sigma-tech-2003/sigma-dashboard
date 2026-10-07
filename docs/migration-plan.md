@@ -26,10 +26,37 @@ existing migration has been modified.
    Every phase before then is additive and invisible to users.
 2. **Read before write, per domain.** A read cutover is trivially reversible; a write cutover
    is not.
-3. **The seam is `src/services/*.js`.** Those modules already isolate every Firestore call
-   from every component (`AGENTS.md` §2 requires it). Cutover swaps their implementation and
-   touches no page or component — which is what keeps "existing frontend architecture
-   unchanged" true.
+3. ~~**The seam is `src/services/*.js`.** Those modules already isolate every Firestore call
+   from every component. Cutover swaps their implementation and touches no page or
+   component.~~ **This premise is wrong, and the plan was ordered around it.** See the
+   correction directly below.
+
+> **Correction (2026-10-07).** Reading the frontend end to end for the cutover showed that
+> `src/services/*.js` is **not** the only place Firebase is called, and that cutover
+> **cannot** be done without touching more than the service modules. Firebase and Firestore
+> are called from three places:
+>
+> 1. **`src/services/`** — ten modules. `firestoreService.js` uses the Firestore SDK directly
+>    (`onSnapshot`, `getDocs`, `setDoc`, `updateDoc`, `deleteDoc`); `authService.js` uses
+>    Firebase Auth; six more wrap callables (`verifyAuthSession`, `inviteEmployee`,
+>    `manageEmployee`, `manageProject`, `manageKpi`, `getScopedWorkspace`); two have no
+>    importer in `src/` at all (`authEmployeeVerificationService.js`,
+>    `legacyEmployeeLinkService.js`).
+> 2. **`src/firebase/useFirestore.js` and `src/firebase/useDepartments.js`** — the data hooks
+>    every page is fed through, and which `App.jsx` imports. They are not service modules:
+>    they build Firestore query descriptors (`createWhereSource`,
+>    `createInternalQuerySource`, `createDocumentSource`) from `firestoreService.js`, chunk
+>    `in`-queries to 30 values, and decide per role which collections to subscribe to.
+> 3. **`src/hooks/`** — `useAuthenticatedCollection.js` subscribes with `onSnapshot` (via
+>    `subscribeToCollectionSources`), `useCollectionResource.js` writes with
+>    `createDocument` / `updateDocument` / `deleteDocument` **directly**, with no service
+>    module in between, and `useAuthSession.js` listens with `onAuthStateChanged`.
+>
+> Consequences: attendance, leaves, payroll and departments have **no service module at
+> all** today — their writes go straight from a hook to Firestore, so each needs a new one;
+> and pages cannot be assumed untouched (see the known hazards under Phase 10). The
+> frontend work is therefore a phase of its own — [Phase 10](#phase-10--frontend-cutover) —
+> not a line item inside Phases 4-9.
 4. **Smallest blast radius first.** Domains cut over in ascending order of coupling, so early
    mistakes are cheap.
 5. **No dual-write.** Single company, small dataset — a brief per-domain freeze plus a final
@@ -257,6 +284,15 @@ all still read and written through Firestore. **This is the phase where both sys
 at once**, so employees data is authoritative in Postgres while the rest still reads Firestore
 employee documents. Keep the ETL running one-way for those collections until each cuts over.
 
+> **Correction (2026-10-07):** the frontend half of this phase — "swap
+> `src/services/authService.js`, `authSessionService.js`, `employeeInvitationService.js` and
+> `employeeMutationService.js` to call the API" — **was not done**, and the statements in
+> Phases 4-8 that a domain "stays on Firebase" describe the *backend's* readiness only: the
+> React app still reads and writes Firebase for every domain. Because `firestore.rules`
+> requires a Firebase Auth identity (`isAuthenticated()` is `request.auth != null`, line
+> 5-6), the browser cannot be on Postgres for login and on Firestore for data. See
+> [Phase 10](#phase-10--frontend-cutover) for what that means.
+
 ---
 
 ## Phase 5 — Departments
@@ -352,18 +388,154 @@ employees whose data was never stale — expect mismatches, since nothing has de
 counters since seeding (ambiguity A2). **Mismatches confirm the computed model is correct**,
 not that the migration is wrong.
 
-**Stays on Firebase.** Nothing. This is the last domain.
+**Stays on Firebase.** Nothing, as far as the *backend* goes: this is the last domain. The
+frontend is a different matter — it still calls Firebase for everything until
+[Phase 10](#phase-10--frontend-cutover) (see the correction under Principle 3).
 
 ---
 
-## Phase 10 — Decommission Firebase
+## Phase 10 — Frontend cutover
+
+*Added 2026-10-07. No earlier phase scheduled this work, and the phase that followed it
+(then called Phase 10, now Phase 11) assumed it had already happened.*
+
+**Why this phase exists.** Phases 4-9 built and tested the backend. None of them touched the
+React app: nothing in `src/` calls `backend/`, and every page still reads and writes Firebase.
+The old plan covered the frontend with one line in Phase 4 ("swap `src/services/*.js`"), which
+was never carried out, and with the premise corrected under Principle 3 — that the swap
+touches no page or component. This phase is that work.
+
+**What this changes about cutover and rollback.** `firestore.rules` requires a Firebase Auth
+identity (`isAuthenticated()` is `request.auth != null`, lines 5-6). Once the browser signs in
+against Postgres it holds no Firebase identity, so it can no longer read or write **any**
+Firestore collection. The login swap and every domain's data swap therefore have to ship
+together. The "each domain cutover is a flag flip" description under
+[Rollback posture](#rollback-posture) does not hold for the frontend — no such per-domain
+switch exists in `src/services/` or the hooks — unless Firebase Auth were kept running
+alongside, which nothing in this plan
+proposes. The 2026-09-21 updates establish that Firestore holds no real production data, which
+is what makes a single cutover survivable; in practice it makes this one window, rehearsed on a
+copy, with rollback meaning a redeploy of the previous frontend build.
+
+**What has to change** (scope, not design — the approach to several items is an open decision,
+listed below):
+
+1. **Move the data hooks out of `src/firebase/` first.** `useFirestore.js` and
+   `useDepartments.js` are the app's data layer, not Firebase plumbing; `App.jsx` imports
+   them. They need a new home (`src/hooks/` is the obvious one) before Phase 11 can delete
+   the directory.
+2. **Auth.** Replace `authService.js` (sign-in, sign-out, the auth-state listener, the
+   password-setup email) and `authSessionService.js` (`verifyAuthSession`) with calls to
+   `POST /auth/login`, `/auth/refresh`, `/auth/logout` and `/auth/set-password`; replace
+   `useAuthSession.js`'s `onAuthStateChanged` with a restore-on-boot against the refresh
+   cookie. Add whatever the session needs that the API does not yet return, and a
+   set-password route in the app, which does not exist.
+3. **One API client.** `firestoreService.js` is replaced by a single client module (base URL,
+   bearer token, refresh on 401) plus per-resource service modules. The Firestore query
+   descriptors, the 30-value `in`-query chunking and the per-role `get*ReadPlan` functions in
+   `useFirestore.js` disappear, because the API scopes every read server-side.
+4. **Replace `onSnapshot` with polling** ([D3](schema-design.md#d3--realtime-behavior-is-lost--settled-polling)),
+   in `useAuthenticatedCollection.js`. It already carries a `refresh` / `refreshKey`
+   mechanism. Points to get right: only the *first* load may set `loading` (`App.jsx` replaces
+   the whole app with a loading screen whenever any collection is loading, so a background
+   poll that flipped it would blank the page); one polling loop rather than eight independent
+   timers; paused while the tab is hidden. **Blocked until
+   [D20](schema-design.md#d20--agentsmd-1-still-forbids-the-polling-decision) is closed.**
+5. **New service modules for the four domains that have none**: attendance, leaves, payroll
+   and departments, whose writes today go from `useCollectionResource.js` straight to
+   Firestore with a client-generated `id: Date.now()`. The API's strict schemas reject `id`,
+   `status`, `days`, `gross`, `tax`, `net` and the like.
+6. **Re-point the four callable-backed modules** (`employeeInvitationService.js`,
+   `employeeMutationService.js`, `projectMutationService.js`, `kpiMutationService.js`).
+   KPI rating moves from the update call to `POST /kpis/:id/rating`; employee delete needs a
+   `replacement_team_lead_id` the UI has no way to supply.
+7. **Delete what becomes redundant.** `scopedWorkspaceService.js`, `useScopedWorkspace.js` and
+   the callable-backed branch in `useProjects` / `useKpis` (managers and TLs now read projects
+   and KPIs directly — ambiguity A8); and the two modules with no importer,
+   `authEmployeeVerificationService.js` and `legacyEmployeeLinkService.js`.
+8. **Translate the data shape.** Every read returns relational snake_case (`full_name`,
+   `position_title`, `department_id`, `employee_number`, `joined_on`, ...); the pages consume
+   Firestore-shaped documents (`name`, `pos`, `dept`, `empId`, `joinDate`, ...), and the leave
+   balance is a different shape altogether. The approach is an open decision
+   ([D39](schema-design.md#d39--response-shape-and-leave-balance-presentation)).
+
+**Known hazards found so far — a partial list.**
+
+- **UUID ids vs numeric coercion — `src/pages/payroll/PayrollPage.jsx:24` and `:46`.** Both
+  do `employees.find(e => e.id === +selEmp)`. The unary `+` turns the selected id into a
+  number; Firestore ids were numeric strings, so it worked. API ids are UUIDs, so `+selEmp`
+  is `NaN`, no employee is found, and payroll can neither be previewed nor processed. **This
+  was found with a single family of grep patterns** (`+sel`, `+form.`, `+e.id`, `+emp`,
+  `=== +`, `Number(…Id)`, `parseInt(…Id)`) run over `src/` **excluding** `src/firebase/` and
+  `src/services/`. It found nothing else, but that is evidence about those patterns only.
+  Other forms of the same assumption — numeric id variants (`getRelationshipIdVariants`,
+  `Number.isSafeInteger` id checks in the service sanitizers, both of which are Firestore-era
+  code), `String(a) === String(b)` comparisons, ids used as array indexes or sort keys, and
+  anything in `Dashboard.jsx` and `ReportsPage.jsx`, which were not read closely — **have not
+  been audited**. Treat the whole of `src/` as unaudited for this hazard until it has been
+  read, not grepped.
+- **Money columns on employees arrive as strings.** `employees.basic` and
+  `employees.allowances` are `numeric`, selected without a cast, so `pg` returns strings
+  ([D28](schema-design.md#d28--payroll-write-rules--settled) records this as a "known,
+  separate fix"). `PayrollPage.jsx:26` computes `emp.basic + emp.allowances + +form.bonus`,
+  which concatenates two strings before adding a number. The payroll preview cannot work
+  until that is fixed.
+- **Client-generated ids.** `LeavePage.jsx`, `PayrollPage.jsx`, `KPIPage.jsx` and the default
+  of `useCollectionResource.create` all send `id: Date.now()`. The API's strict schemas
+  reject `id`.
+- **Department status casing.** `DepartmentsPage.jsx` writes and compares `"Active"`; the API
+  enum is lowercase `active` / `inactive`.
+- **Departments are identified by *name* in the pages** (`e.dept === dept.name`, 51
+  occurrences of `.dept` outside `src/firebase/` and `src/services/`), while the API
+  identifies them by id and only admin and hr can read the department list
+  ([D33](schema-design.md#d33--department-names-for-manager-tl-and-employee)).
+
+**Open decisions this phase cannot start without** (all recorded in
+[schema-design.md §9](schema-design.md#9-decisions-i-need-from-you), none settled):
+
+| Decision | Gates |
+|---|---|
+| [D20](schema-design.md#d20--agentsmd-1-still-forbids-the-polling-decision) `AGENTS.md` §1 vs polling | the polling work (item 4) |
+| [D32](schema-design.md#d32--session-restore-and-the-frontends-own-profile) no session / profile endpoint | login and every page |
+| [D33](schema-design.md#d33--department-names-for-manager-tl-and-employee) department names for manager, tl, employee | login, and every `.dept` use |
+| [D34](schema-design.md#d34--delivering-the-password-setup-link-builds-on-d25) password-setup delivery | employee creation |
+| [D35](schema-design.md#d35--employee-status-on-create) employee status on create | employee creation |
+| [D36](schema-design.md#d36--production-cookie-topology) production cookie topology | login in production |
+| [D37](schema-design.md#d37--the-role-selector-role_mismatch) the role selector | login |
+| [D38](schema-design.md#d38--payroll-tax-client-preview-vs-the-database) payroll tax parity | the payroll page |
+| [D39](schema-design.md#d39--response-shape-and-leave-balance-presentation) response shape and leave-balance presentation | every page |
+
+**Depends on.** Phase 9 (done), D20 closed, and at least D32, D33, D34, D36 and D37 decided,
+since together they gate login.
+
+**Verified by.** A staged rehearsal on a copy: each of the five roles logs in through the UI,
+sees the scope the API returns, and performs the role × operation matrix; a decision made by
+one user appears for another within the polling interval; `npm run build` passes with the
+Firebase code still present (it is removed only in Phase 11).
+
+**Stays on Firebase.** Nothing at runtime once cut over. The Firebase code, rules, functions
+and project remain in place until Phase 11.
+
+---
+
+## Phase 11 — Decommission Firebase
+
+*Previously numbered Phase 10; renumbered 2026-10-07 when the frontend cutover was inserted
+ahead of it.*
 
 **Build.** Delete `functions/`, `firestore.rules`, `firebase.json` and `src/firebase/`; remove
 the `firebase` dependency; remove `VITE_FIREBASE_*` from the environment; delete the dead
 seeder `src/firebase/seedFirestore.js` (ambiguity A11 — it cannot run under current rules
 anyway).
 
-**Depends on.** Phases 4-9 all landed and stable for an agreed soak period.
+> **Prerequisite (added 2026-10-07): `src/firebase/` is not only Firebase.** Besides
+> `firebaseConfig.js` and the dead seeder, it holds `useFirestore.js` and `useDepartments.js`
+> — the hooks every page is fed through, imported by `App.jsx`. Deleting the directory as
+> written above would delete the app's data layer. Those two files **must be moved out in
+> Phase 10**, and this phase may delete `src/firebase/` only after a search of `src/` shows
+> nothing outside that directory still imports from it.
+
+**Depends on.** Phase 10, and Phases 4-9, all landed and stable for an agreed soak period.
 
 **Verified by.** `npm run build` succeeds with no Firebase import anywhere; a full pass of the
 role × operation matrix against the API only; Firestore access logs show zero reads for the
@@ -395,12 +567,18 @@ Phase 0  schema ──► 1 auth/scope ──► 2 ETL ──► 3 read API + pa
                                                      9 leaves  ◄── blocked by D4
                                                                 │
                                                                 ▼
-                                                     10 decommission
+                                                     10 frontend cutover  ◄── blocked by D20, D32-D39
+                                                                │
+                                                                ▼
+                                                     11 decommission
 ```
 
 Phases 5-8 are drawn sequentially because each is a separate cutover window, but they are
 independent of one another and could be reordered or parallelised. Phase 9 is last by
 necessity; Phase 4 must precede all of them because scope resolution depends on it.
+
+Phases 0-9 are the **backend**; Phase 10 is the whole **frontend** cutover and is a single
+window (see its note on why it cannot be per-domain); Phase 11 removes Firebase.
 
 ---
 
@@ -408,6 +586,13 @@ necessity; Phase 4 must precede all of them because scope resolution depends on 
 
 Each domain cutover is a flag flip in its `src/services/*.js` module. Rollback is reverting
 the flag — **but any writes made to Postgres after the flip are not in Firestore.**
+
+> **Correction (2026-10-07):** this describes the *backend* domains' data, not the frontend.
+> No such flag exists in `src/services/` or the hooks, and none could work: Firestore requires
+> a Firebase Auth identity, so once the browser logs in against Postgres it cannot reach
+> Firestore at all. The frontend cuts over in one window ([Phase 10](#phase-10--frontend-cutover)),
+> and its rollback is redeploying the previous frontend build. The caveat about writes made to
+> Postgres after the cutover still applies.
 
 The mitigation, sized to a single-company dataset: a brief freeze per domain, a final ETL
 re-sync, then the flip. If rollback is needed within the window, the lost writes are few and
@@ -429,7 +614,8 @@ and rehearse it fully on a copy first.
 | ~~[D3](schema-design.md#d3--realtime-behavior-is-lost--settled-polling) realtime loss~~ | Phase 3-4 | **settled** — polling; but see D20 below |
 | ~~[D11](schema-design.md#d11--firebase-auth-passwords-cannot-be-exported) password migration~~ | Phase 4 | **settled (2026-09-21)** — moot, no data migration, no existing users |
 | [D4](schema-design.md#d4--where-do-leave-entitlements-come-from) leave entitlements | Phase 9 | balances are uncomputable without it |
-| [D20](schema-design.md#d20--agentsmd-1-still-forbids-the-polling-decision) `AGENTS.md` §1 conflict | Phase 3 | the rule still forbids what D3 decided |
+| [D20](schema-design.md#d20--agentsmd-1-still-forbids-the-polling-decision) `AGENTS.md` §1 conflict | Phase 3 (still open; now also gates Phase 10's polling work) | the rule still forbids what D3 decided |
+| [D32](schema-design.md#d32--session-restore-and-the-frontends-own-profile)–[D39](schema-design.md#d39--response-shape-and-leave-balance-presentation) frontend cutover gaps | Phase 10 | all open; each is a gap between what the API provides and what the frontend needs — Phase 10 lists which gates what |
 
 **D3 is settled as polling, but D20 is not.** The app is live-updating today via `onSnapshot`;
 under polling it will not be. `AGENTS.md` §1 requires UI behavior to stay unchanged during the
