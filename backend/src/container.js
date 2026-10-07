@@ -16,6 +16,8 @@ import { createDepartmentMutationService } from "./services/departmentMutationSe
 import { createEmployeeMutationService } from "./services/employeeMutationService.js";
 import { createPasswordSetService } from "./services/passwordSetService.js";
 import { createKpiMutationService } from "./services/kpiMutationService.js";
+import { createLeaveBalanceService } from "./services/leaveBalanceService.js";
+import { createLeaveMutationService } from "./services/leaveMutationService.js";
 import { createPayrollMutationService } from "./services/payrollMutationService.js";
 import { createProjectMutationService } from "./services/projectMutationService.js";
 
@@ -37,6 +39,7 @@ export function getContainer() {
     const payrollRepository = createPayrollRepository(database);
     const projectRepository = createProjectRepository(database);
     const kpiRepository = createKpiRepository(database);
+    const leaveRepository = createLeaveRepository(database);
     const passwordSetTokenRepository = createPasswordSetTokenRepository(database);
     const passwordSetService = createPasswordSetService({
       passwordSetTokenRepository,
@@ -53,7 +56,7 @@ export function getContainer() {
       departmentRepository,
       projectRepository,
       kpiRepository,
-      leaveRepository: createLeaveRepository(database),
+      leaveRepository,
       attendanceRepository,
       payrollRepository,
       authService: createAuthService({
@@ -72,6 +75,12 @@ export function getContainer() {
       payrollMutationService: createPayrollMutationService({ payrollRepository, employeeRepository }),
       projectMutationService: createProjectMutationService({ projectRepository, employeeRepository }),
       kpiMutationService: createKpiMutationService({ kpiRepository, projectRepository, employeeRepository }),
+      leaveMutationService: createLeaveMutationService({ leaveRepository, timeZone: getCompanyTimezone() }),
+      leaveBalanceService: createLeaveBalanceService({
+        leaveRepository,
+        employeeRepository,
+        timeZone: getCompanyTimezone(),
+      }),
     });
   }
   return container;
