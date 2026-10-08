@@ -63,6 +63,38 @@ const CREATE_INPUT = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
+// createEmployee: employment_status (D35)
+// ---------------------------------------------------------------------------
+
+test("createEmployee: D35 -- employment_status defaults to 'active' when the caller says nothing", async () => {
+  const repository = fakeEmployeeRepository();
+  const service = createEmployeeMutationService({ employeeRepository: repository });
+
+  await service.createEmployee(principalFor("admin"), { ...CREATE_INPUT, department_id: DEPARTMENT });
+
+  assert.equal(repository.calls.create[0].employmentStatus, "active");
+});
+
+test("createEmployee: D35 -- an explicit 'inactive' is passed to the repository unchanged", async () => {
+  const repository = fakeEmployeeRepository();
+  const service = createEmployeeMutationService({ employeeRepository: repository });
+
+  await service.createEmployee(principalFor("admin"), { ...CREATE_INPUT, department_id: DEPARTMENT, employment_status: "inactive" });
+
+  assert.equal(repository.calls.create[0].employmentStatus, "inactive");
+});
+
+test("createEmployee: D35 -- choosing a status needs no authority beyond that of creating the employee at all", async () => {
+  // A manager may create an employee in their own department; they may equally create one inactive.
+  const repository = fakeEmployeeRepository();
+  const service = createEmployeeMutationService({ employeeRepository: repository });
+
+  await service.createEmployee(principalFor("manager"), { ...CREATE_INPUT, employment_status: "inactive" });
+
+  assert.equal(repository.calls.create[0].employmentStatus, "inactive");
+});
+
+// ---------------------------------------------------------------------------
 // createEmployee: scope defaulting
 // ---------------------------------------------------------------------------
 

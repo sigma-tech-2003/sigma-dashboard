@@ -87,6 +87,39 @@ test("write re-selects use the same formatted column list as the reads", async (
   assert.match(select.text, /to_char\(projects\.due_date, 'YYYY-MM-DD'\) AS due_date/);
 });
 
+test("D33 -- every project read selects department_name beside department_id, as a subquery that adds no join", async () => {
+  // Only admin and hr may read the departments list, but a manager, tl or employee needs the NAME of the
+  // department their projects belong to.
+  const database = fakeDatabase([[/FROM projects/, { rows: [] }]]);
+  const repository = createProjectRepository(database);
+  const principal = { userId: "u", employeeId: "e", role: "admin", departmentId: null };
+
+  await repository.listForPrincipal(principal);
+  await repository.findByIdForPrincipal(PROJECT, principal);
+  await repository.findByIdForWrite(PROJECT);
+
+  assert.equal(database.calls.length, 3);
+  for (const { text } of database.calls) {
+    assert.match(text, /\(SELECT departments\.name FROM departments WHERE departments\.id = projects\.department_id\) AS department_name/);
+    assert.match(text, /projects\.department_id,/, "the id is still returned beside the name");
+    assert.doesNotMatch(text, /JOIN departments/i);
+    assert.match(text, / FROM projects WHERE projects\./, "FROM and WHERE are exactly as before");
+  }
+});
+
+test("D33 -- the write re-select carries department_name too, so a write response has the read shape", async () => {
+  const database = fakeDatabase([
+    [/SELECT company_id FROM departments/, { rows: [{ company_id: "co" }] }],
+    [/^INSERT INTO projects/, { rows: [{ id: PROJECT }] }],
+    projectSelect(),
+  ]);
+
+  await createProjectRepository(database).create(CREATE_INPUT);
+
+  const select = database.calls.find((call) => /FROM projects WHERE projects\.id/.test(call.text));
+  assert.match(select.text, /AS department_name/);
+});
+
 test("a write result keeps the read shape: assignedEmployeeIds, not assigned_employee_ids (the deferred D29 inconsistency)", async () => {
   // Requests say assigned_employee_ids; every response -- read or write -- says assignedEmployeeIds,
   // the Phase 3 shape the parity harness depends on. Pinned so changing it later is deliberate.

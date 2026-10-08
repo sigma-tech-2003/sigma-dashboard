@@ -57,6 +57,7 @@ function fakeEmployeeRepository(seedEmployees = []) {
         joined_on: input.joinedOn,
         basic: input.basic,
         allowances: input.allowances,
+        employment_status: input.employmentStatus,
         role: input.role,
         email: input.email,
       };
@@ -172,6 +173,75 @@ test("POST /employees: a missing required field is rejected with 400", async () 
     assert.equal(response.status, 400);
   } finally {
     await app.close();
+  }
+});
+
+// ---- D35: employment_status on create is 'active' or 'inactive', and nothing else ----------------
+
+test("POST /employees: D35 -- employment_status defaults to 'active' when omitted", async () => {
+  const repository = fakeEmployeeRepository();
+  const app = await startApp(principalFor("admin"), repository);
+  try {
+    const response = await app.request("POST", "/api/v1/employees", { ...VALID_CREATE_BODY, department_id: DEPARTMENT });
+
+    assert.equal(response.status, 201);
+    assert.equal(repository.calls.create[0].employmentStatus, "active");
+    assert.equal(response.body.data.employment_status, "active");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /employees: D35 -- 'inactive' is accepted and reaches the repository, for every role that may create", async () => {
+  for (const role of ["admin", "hr", "manager", "tl"]) {
+    // A tl's new hire defaults to being on their own team, and the service checks that the lead exists.
+    const repository = fakeEmployeeRepository([employee({ id: SELF, role: "tl" })]);
+    const app = await startApp(principalFor(role), repository);
+    try {
+      const response = await app.request("POST", "/api/v1/employees", {
+        ...VALID_CREATE_BODY, department_id: DEPARTMENT, employment_status: "inactive",
+      });
+
+      assert.equal(response.status, 201, role);
+      assert.equal(repository.calls.create[0].employmentStatus, "inactive", role);
+      assert.equal(response.body.data.employment_status, "inactive", role);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("POST /employees: D35 -- 'terminated' and 'on_leave' stay impossible at creation, as does anything else (400, nothing created)", async () => {
+  for (const employment_status of ["terminated", "on_leave", "Active", "INACTIVE", "suspended", "invited", "", null, 1, true]) {
+    const repository = fakeEmployeeRepository();
+    const app = await startApp(principalFor("admin"), repository);
+    try {
+      const response = await app.request("POST", "/api/v1/employees", {
+        ...VALID_CREATE_BODY, department_id: DEPARTMENT, employment_status,
+      });
+
+      assert.equal(response.status, 400, String(employment_status));
+      assert.equal(response.body.error.code, "invalid_request", String(employment_status));
+      assert.equal(repository.calls.create.length, 0, String(employment_status));
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("PATCH /employees/:id: D35 -- an UPDATE still accepts all four statuses; only create was narrowed", async () => {
+  for (const employment_status of ["active", "inactive", "on_leave", "terminated"]) {
+    const target = employee();
+    const repository = fakeEmployeeRepository([target]);
+    const app = await startApp(principalFor("admin"), repository);
+    try {
+      const response = await app.request("PATCH", `/api/v1/employees/${target.id}`, { employment_status });
+
+      assert.equal(response.status, 200, employment_status);
+      assert.equal(repository.calls.updateById[0].changes.employment_status, employment_status, employment_status);
+    } finally {
+      await app.close();
+    }
   }
 });
 

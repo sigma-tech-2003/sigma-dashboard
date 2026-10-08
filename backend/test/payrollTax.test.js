@@ -3,6 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadMigrations } from "../src/db/migrator.js";
+import { CENTS, firestoreForm, sqlForm, toCents } from "./helpers/exactPayrollTax.js";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDirectory = path.join(directory, "..", "src", "db", "migrations");
@@ -25,39 +26,7 @@ const migrationsDirectory = path.join(directory, "..", "src", "db", "migrations"
 // database in this environment. They verify the bracket table the SQL encodes and the
 // logic it implements. Running the DDL against PostgreSQL remains a separate step.
 
-const CENTS = 100n;
-const SCALE = 10_000n; // rate is applied as an integer numerator over this denominator
 
-/** Round a non-negative rational numerator/SCALE half away from zero. */
-function roundHalfAwayFromZero(numerator) {
-  assert.ok(numerator >= 0n, "payroll amounts are non-negative by CHECK constraint");
-  return (numerator + SCALE / 2n) / SCALE;
-}
-
-function bracketFor(grossCents) {
-  if (grossCents <= 50_000n * CENTS) return null;
-  if (grossCents <= 100_000n * CENTS) return { floor: 50_000n, rate: 5n, constant: 0n };
-  if (grossCents <= 200_000n * CENTS) return { floor: 100_000n, rate: 10n, constant: 2_500n };
-  return { floor: 200_000n, rate: 15n, constant: 12_500n };
-}
-
-/** The form the SQL uses: round the variable part, then add the integer constant. */
-function sqlForm(grossCents) {
-  const bracket = bracketFor(grossCents);
-  if (!bracket) return 0n;
-  const variable = (grossCents - bracket.floor * CENTS) * bracket.rate;
-  return roundHalfAwayFromZero(variable) + bracket.constant;
-}
-
-/** The form firestore.rules uses: round the constant and variable part together. */
-function firestoreForm(grossCents) {
-  const bracket = bracketFor(grossCents);
-  if (!bracket) return 0n;
-  const variable = (grossCents - bracket.floor * CENTS) * bracket.rate;
-  return roundHalfAwayFromZero(bracket.constant * SCALE + variable);
-}
-
-const toCents = (units) => BigInt(Math.round(units * 100));
 
 // Every bracket boundary, both sides of it, plus the exact-half cases that distinguish
 // rounding modes.

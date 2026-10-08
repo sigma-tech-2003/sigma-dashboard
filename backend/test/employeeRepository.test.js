@@ -68,8 +68,134 @@ test("create: happy path inserts users then employees, in one transaction, and r
   const employeeInsert = database.calls.find((call) => call.text.includes("INSERT INTO employees"));
   assert.deepEqual(employeeInsert.values, [
     "user-1", "company-1", "dept-1", null, "EMP-0001",
-    "New Hire", null, "Engineer", "2026-09-25", 50000, 0,
+    "New Hire", null, "Engineer", "2026-09-25", 50000, 0, "active",
   ]);
+});
+
+test("create: D35 -- employment_status is written, defaulting to 'active' and accepting 'inactive'", async () => {
+  const handlers = () => [
+    ["SELECT id FROM companies LIMIT 1", { rows: [{ id: "company-1" }] }],
+    ["INSERT INTO users", { rows: [{ id: "user-1" }] }],
+    ["next_employee_number()", { rows: [{ employee_number: "EMP-0001" }] }],
+    ["INSERT INTO employees", { rows: [{ id: "employee-1" }] }],
+    [/SELECT[\s\S]*FROM employees[\s\S]*JOIN users/, { rows: [JOINED_ROW] }],
+  ];
+
+  const defaulted = fakeDatabase(handlers());
+  await createEmployeeRepository(defaulted).create(CREATE_INPUT);
+  const defaultedInsert = defaulted.calls.find((call) => call.text.includes("INSERT INTO employees"));
+  assert.match(defaultedInsert.text, /employment_status\)/, "the column is in the insert list");
+  assert.equal(defaultedInsert.values.at(-1), "active");
+
+  const inactive = fakeDatabase(handlers());
+  await createEmployeeRepository(inactive).create({ ...CREATE_INPUT, employmentStatus: "inactive" });
+  const inactiveInsert = inactive.calls.find((call) => call.text.includes("INSERT INTO employees"));
+  assert.equal(inactiveInsert.values.at(-1), "inactive");
+});
+
+test("create: D35 -- the user account is 'invited' whatever the employment status, so activating later is possible", async () => {
+  const database = fakeDatabase([
+    ["SELECT id FROM companies LIMIT 1", { rows: [{ id: "company-1" }] }],
+    ["INSERT INTO users", { rows: [{ id: "user-1" }] }],
+    ["next_employee_number()", { rows: [{ employee_number: "EMP-0001" }] }],
+    ["INSERT INTO employees", { rows: [{ id: "employee-1" }] }],
+    [/SELECT[\s\S]*FROM employees[\s\S]*JOIN users/, { rows: [JOINED_ROW] }],
+  ]);
+  await createEmployeeRepository(database).create({ ...CREATE_INPUT, employmentStatus: "inactive" });
+
+  const userInsert = database.calls.find((call) => call.text.includes("INSERT INTO users"));
+  assert.match(userInsert.text, /'invited'/);
+  assert.doesNotMatch(userInsert.text, /inactive/);
+});
+
+// ---------------------------------------------------------------------------
+// The shape every employee read returns (D33, D38, D31's date fix)
+// ---------------------------------------------------------------------------
+
+/** A database whose query() and connect() both record the SQL, for the read methods and the write re-select. */
+function recordingDatabase(rows = [JOINED_ROW]) {
+  const calls = [];
+  const run = async (text, values) => {
+    calls.push({ text: text.trim().replace(/\s+/g, " "), values });
+    return { rows };
+  };
+  return { calls, query: run, connect: async () => ({ query: run, release() {} }) };
+}
+
+const PRINCIPAL = Object.freeze({ userId: "u", employeeId: "e", role: "admin", departmentId: null });
+
+const READS = [
+  ["listForPrincipal", (repository) => repository.listForPrincipal(PRINCIPAL)],
+  ["findByIdForPrincipal", (repository) => repository.findByIdForPrincipal("employee-1", PRINCIPAL)],
+  ["findById", (repository) => repository.findById("employee-1")],
+  ["findByUserId", (repository) => repository.findByUserId("user-1")],
+  ["findTeamMembers", (repository) => repository.findTeamMembers("tl-1")],
+];
+
+test("every employee read selects department_name -- a manager, tl or employee cannot read the departments list", async () => {
+  for (const [name, read] of READS) {
+    const database = recordingDatabase();
+    await read(createEmployeeRepository(database));
+
+    const { text } = database.calls[0];
+    assert.match(text, /\(SELECT departments\.name FROM departments WHERE departments\.id = employees\.department_id\) AS department_name/, name);
+    assert.match(text, /employees\.department_id,/, `${name}: the id is still returned beside the name`);
+  }
+});
+
+test("department_name is a scalar subquery, so no read gained a join and none needs a filter on departments", async () => {
+  for (const [name, read] of READS) {
+    const database = recordingDatabase();
+    await read(createEmployeeRepository(database));
+
+    const { text } = database.calls[0];
+    assert.doesNotMatch(text, /JOIN departments/i, name);
+    assert.match(text, /FROM employees JOIN users ON users\.id = employees\.user_id/, `${name}: FROM and JOIN unchanged`);
+  }
+});
+
+test("every employee read returns basic and allowances as float8, so they are JSON numbers (D38)", async () => {
+  for (const [name, read] of READS) {
+    const database = recordingDatabase();
+    await read(createEmployeeRepository(database));
+
+    const { text } = database.calls[0];
+    assert.match(text, /employees\.basic::float8 AS basic/, name);
+    assert.match(text, /employees\.allowances::float8 AS allowances/, name);
+  }
+});
+
+test("every employee read returns joined_on as YYYY-MM-DD text, so a UTC+5 server cannot serialise a day early", async () => {
+  for (const [name, read] of READS) {
+    const database = recordingDatabase();
+    await read(createEmployeeRepository(database));
+
+    assert.match(database.calls[0].text, /to_char\(employees\.joined_on, 'YYYY-MM-DD'\) AS joined_on/, name);
+  }
+});
+
+test("the write re-selects (create and update) use the same column list as the reads, so a write response has the read shape", async () => {
+  const created = recordingDatabase();
+  const repository = createEmployeeRepository({
+    ...created,
+    connect: async () => ({
+      query: async (text, values) => {
+        created.calls.push({ text: text.trim().replace(/\s+/g, " "), values });
+        if (/FROM companies/.test(text)) return { rows: [{ id: "company-1" }] };
+        if (/INSERT INTO users/.test(text)) return { rows: [{ id: "user-1" }] };
+        if (/next_employee_number/.test(text)) return { rows: [{ employee_number: "EMP-0001" }] };
+        if (/INSERT INTO employees/.test(text)) return { rows: [{ id: "employee-1" }] };
+        return { rows: [JOINED_ROW] };
+      },
+      release() {},
+    }),
+  });
+  await repository.create(CREATE_INPUT);
+
+  const reselect = created.calls.find((call) => /SELECT .* FROM employees JOIN users/.test(call.text));
+  assert.match(reselect.text, /AS department_name/);
+  assert.match(reselect.text, /basic::float8 AS basic/);
+  assert.match(reselect.text, /to_char\(employees\.joined_on/);
 });
 
 test("create: a duplicate email is translated to a clean 409, and the transaction is rolled back", async () => {
