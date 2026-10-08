@@ -26,8 +26,8 @@ export function createPayrollMutationService({ payrollRepository, employeeReposi
     /**
      * basic and allowances default to the employee's CURRENT values when omitted; explicit
      * values win (backdated periods, raises, corrections). bonus and deductions have already
-     * defaulted to 0 and status to 'processed' in the schema. The employee row's numerics arrive
-     * from pg as strings, which a numeric parameter accepts as-is.
+     * defaulted to 0 and status to 'processed' in the schema. The employee row's basic and allowances
+     * arrive as numbers (cast to float8 in employeeRepository, D38), which a numeric parameter accepts.
      */
     async createPayroll(principal, input) {
       assertCanWritePayroll(principal);

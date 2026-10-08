@@ -10,6 +10,7 @@ import { createKpiRouter } from "./kpiRoutes.js";
 import { createLeaveBalanceRouter } from "./leaveBalanceRoutes.js";
 import { createLeaveRouter } from "./leaveRoutes.js";
 import { createPayrollRouter } from "./payrollRoutes.js";
+import { createProfileRouter } from "./profileRoutes.js";
 import { createProjectRouter } from "./projectRoutes.js";
 import { createResourceRouter } from "./resourceRoutes.js";
 
@@ -31,7 +32,7 @@ const RESOURCE_ROUTES = [
 ];
 
 /**
- * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object, employeeMutationService?: object, departmentMutationService?: object, attendanceMutationService?: object, payrollMutationService?: object, projectMutationService?: object, kpiMutationService?: object, leaveMutationService?: object, leaveBalanceService?: object, passwordSetService?: object }} [dependencies]
+ * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object, profileService?: object, employeeMutationService?: object, departmentMutationService?: object, attendanceMutationService?: object, payrollMutationService?: object, projectMutationService?: object, kpiMutationService?: object, leaveMutationService?: object, leaveBalanceService?: object, passwordSetService?: object }} [dependencies]
  *   `repositories` lets tests inject fakes keyed the same as the container
  *   (employeeRepository, departmentRepository, ...) without a database. `authService`,
  *   `employeeMutationService`, `departmentMutationService`, `attendanceMutationService`,
@@ -60,6 +61,12 @@ export function createApiRouter(dependencies = {}) {
   router.use(createAuthenticationMiddleware({
     verifyAccessToken: dependencies.verifyAccessToken ?? verifyAccessToken,
   }));
+
+  // GET /auth/me (D32) lives at /auth like the public routes above, but it needs a bearer token, so it
+  // is a separate router placed AFTER the middleware. An unauthenticated request for it passes through
+  // the public auth router (which has no such route) and is stopped by the middleware with a 401.
+  const getProfileService = () => dependencies.profileService ?? getContainer().profileService;
+  router.use("/auth", createProfileRouter(getProfileService));
 
   for (const { path, repositoryKey, resourceName } of RESOURCE_ROUTES) {
     // Deferred: must not call getContainer() while building the router, only when a

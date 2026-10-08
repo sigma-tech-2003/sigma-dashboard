@@ -2039,7 +2039,10 @@ own row from `GET /employees/:id`) was rejected because it only works once D33 a
 ties the session to a general-purpose read endpoint.
 
 Consequences — recorded, **not built**:
-- It is a backend addition that does not exist yet: a route, controller, service method, tests and an
+- **Backend built 2026-10-09** (uncommitted at the time of writing): `GET /api/v1/auth/me`, behind the
+  authentication middleware, returning the caller's own profile with no compensation; unit, route and
+  end-to-end tests (`scripts/e2e-frontend-prereqs.js`). The frontend side is still not built.
+- It is a backend addition that did not exist when this was written: a route, controller, service method, tests and an
   end-to-end check. It must land **before** [Phase 10](migration-plan.md#phase-10--frontend-cutover)'s
   frontend work, since login cannot be rebuilt without it.
 - Boot makes two sequential requests before the first render; the existing loading screen covers the gap.
@@ -2104,6 +2107,10 @@ where only the name is needed, and moves name resolution into the frontend mappe
 against the frozen-UI rule in `AGENTS.md` §1.
 
 Consequences — recorded, **not built**:
+- **Backend built 2026-10-09**, by a scalar subquery in the shared column lists rather than a join (same
+  result, and no `FROM` or `WHERE` clause in any existing query had to change): `department_name` is on
+  every employee and project read, including write responses, and on `/auth/me`. `GET /departments` is
+  unchanged and still closed to manager, tl and employee. The frontend side is still not built.
 - A backend addition: a join in the employee and project read queries and in `/auth/me`, with tests and an
   end-to-end check. It lands before the frontend work, alongside D32's `/auth/me`.
 - The field is additive, so existing consumers of these reads are unaffected.
@@ -2242,6 +2249,10 @@ rejected for the half-created record described in the correction above, and beca
 partial-failure handling in the page for something one call can do.
 
 Consequences — recorded, **not built**:
+- **Backend built 2026-10-09**: `POST /employees` accepts an optional `employment_status` of `active` or
+  `inactive` (default `active`); `terminated`, `on_leave` and anything else are 400. `users.status` is still
+  `invited` either way, and the end-to-end run confirmed an employee created inactive cannot log in even
+  after setting a password, and can once made active. The frontend side is still not built.
 - A small backend addition: an optional field in the strict create schema, passed through the service, and
   written by the repository's insert (which today leaves the column to its default), with tests and an
   end-to-end check.
@@ -2454,6 +2465,14 @@ drift the evidence does not show. **C** (show only gross, with "tax and net calc
 rejected as a visible UI change against `AGENTS.md` §1.
 
 Consequences — recorded, **not built**:
+- **Built 2026-10-09:** the `float8` cast on the employee money columns (backend), and `calcTax` and
+  `payrollTax` extracted to `src/utils/payrollTax.js` as a pure module. `helpers.js` still holds its own
+  copy until Phase 10 re-points the page; `backend/test/payrollTaxClientParity.test.js` checks the two copies
+  are textually identical and that the extracted module agrees with the database function's exact arithmetic.
+  That test lives in the backend suite, because the frontend has no test runner yet (D39). The page itself is
+  not changed.
+  Also fixed in the same change: employee reads returned `joined_on` as a raw `Date`, which serialises a day
+  early; it is now `YYYY-MM-DD` text.
 - A small backend change: the `float8` cast on the employee money columns, with a test and an end-to-end
   check. It also corrects what any other consumer of those reads sees.
 - A small frontend refactor: extract `calcTax`, and the parity test with it. This is a `node --test` test, so

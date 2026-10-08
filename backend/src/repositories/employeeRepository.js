@@ -6,18 +6,29 @@ const EMPLOYEE_COLUMNS = `
   employees.user_id,
   employees.company_id,
   employees.department_id,
+  (SELECT departments.name FROM departments WHERE departments.id = employees.department_id) AS department_name,
   employees.team_lead_id,
   employees.employee_number,
   employees.full_name,
   employees.phone,
   employees.position_title,
   employees.employment_status,
-  employees.joined_on,
-  employees.basic,
-  employees.allowances,
+  to_char(employees.joined_on, 'YYYY-MM-DD') AS joined_on,
+  employees.basic::float8 AS basic,
+  employees.allowances::float8 AS allowances,
   employees.created_at,
   employees.updated_at
 `;
+// Three deliberate choices in the list above, all about what the frontend can use as-is:
+//  - department_name (D33): admin and hr are the only roles that may read the departments list, but a
+//    manager, tl or employee needs their department's NAME. A scalar subquery rather than a join so
+//    every query that selects this list keeps its FROM and WHERE untouched; it behaves as a LEFT JOIN
+//    (null if the row were ever missing) and, like one, does not filter departments.deleted_at.
+//  - joined_on is formatted in SQL (D31's serialization fix): pg parses a `date` into a JS Date at
+//    server-local midnight, which JSON-serialises a day early on any server east of UTC.
+//  - basic and allowances are cast to float8 (D38), as payroll's money columns already are (D28): pg
+//    returns numeric as a string, and the frontend adds these values. numeric(12,2) has at most 12
+//    significant digits, which a double holds exactly.
 // basic/allowances are included for whoever the scope predicate already lets see the row --
 // Firestore has no field-level security, only document-level, so a manager viewing their
 // department sees full compensation there today. This is parity, not a new exposure
@@ -147,8 +158,15 @@ export function createEmployeeRepository(database) {
      * always status = 'invited' with no password_hash -- nobody can log in until a separate
      * flow sets one (not part of this phase). employee_number is drawn from
      * next_employee_number() (migration 005 / D17), never invented here.
+     *
+     * `employmentStatus` (D35) is 'active' or 'inactive'; the service allows no other value at creation.
+     * users.status stays 'invited' either way: login needs BOTH users.status and employment_status to be
+     * 'active', so an employee created inactive cannot log in whatever happens to their password.
      */
-    async create({ email, role, fullName, phone, departmentId, positionTitle, joinedOn, basic, allowances, teamLeadId }) {
+    async create({
+      email, role, fullName, phone, departmentId, positionTitle, joinedOn, basic, allowances, teamLeadId,
+      employmentStatus = "active",
+    }) {
       const client = await database.connect();
       try {
         await client.query("BEGIN");
@@ -170,11 +188,11 @@ export function createEmployeeRepository(database) {
         const { rows: [employee] } = await client.query(
           `INSERT INTO employees
              (user_id, company_id, department_id, team_lead_id, employee_number,
-              full_name, phone, position_title, joined_on, basic, allowances)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+              full_name, phone, position_title, joined_on, basic, allowances, employment_status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            RETURNING id`,
           [user.id, company.id, departmentId, teamLeadId, employeeNumber,
-            fullName, phone, positionTitle, joinedOn, basic, allowances],
+            fullName, phone, positionTitle, joinedOn, basic, allowances, employmentStatus],
         );
 
         const created = await selectEmployeeById(client, employee.id);

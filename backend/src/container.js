@@ -18,6 +18,7 @@ import { createPasswordSetService } from "./services/passwordSetService.js";
 import { createKpiMutationService } from "./services/kpiMutationService.js";
 import { createLeaveBalanceService } from "./services/leaveBalanceService.js";
 import { createLeaveMutationService } from "./services/leaveMutationService.js";
+import { createProfileService } from "./services/profileService.js";
 import { createPayrollMutationService } from "./services/payrollMutationService.js";
 import { createProjectMutationService } from "./services/projectMutationService.js";
 
@@ -65,6 +66,7 @@ export function getContainer() {
         refreshTokenRepository,
       }),
       passwordSetService,
+      profileService: createProfileService({ employeeRepository }),
       employeeMutationService: createEmployeeMutationService({ employeeRepository, passwordSetService }),
       departmentMutationService: createDepartmentMutationService({ departmentRepository }),
       attendanceMutationService: createAttendanceMutationService({

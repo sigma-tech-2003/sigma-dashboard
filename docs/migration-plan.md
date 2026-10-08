@@ -548,6 +548,9 @@ listed below):
 
 **Work these decisions require — recorded, not built.** *(Added 2026-10-09 from the eight decisions, so it
 is in one place.)*
+- **Backend — built 2026-10-09, uncommitted** (all four, plus `calcTax` extracted to `src/utils/payrollTax.js`
+  and the parity test; D37 confirmed to need no change and pinned by a test): the item below is the
+  original description.
 - **Backend, to land before the frontend work** — four small additions, each with tests and an end-to-end
   check: `GET /auth/me` (D32); `department_name` on employee reads, project reads and `/auth/me` (D33); an
   optional `employment_status` on `POST /employees` (D35); and the employee `basic` and `allowances` returned

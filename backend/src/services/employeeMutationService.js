@@ -68,9 +68,9 @@ export function createEmployeeMutationService({ employeeRepository, passwordSetS
   return Object.freeze({
     /**
      * Creates the employee plus their user row (status invited, no password -- see
-     * employeeRepository.js). employment_status is never caller-settable here: it always
-     * starts 'active' (the column default), matching that a brand new hire cannot
-     * sensibly start terminated or on leave.
+     * employeeRepository.js). employment_status may be 'active' (the default) or 'inactive' (D35);
+     * the schema refuses 'terminated' and 'on_leave', since a brand new hire cannot sensibly start
+     * either. Nothing here gates it beyond who may create the employee at all.
      */
     async createEmployee(principal, input) {
       const attributes = resolveCreateAttributes(principal, input);
@@ -90,6 +90,7 @@ export function createEmployeeMutationService({ employeeRepository, passwordSetS
         basic: attributes.basic,
         allowances: attributes.allowances,
         teamLeadId: attributes.team_lead_id,
+        employmentStatus: attributes.employment_status ?? "active",
       });
     },
 

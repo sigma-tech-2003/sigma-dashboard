@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { userRoleSchema, uuidSchema } from "./commonSchemas.js";
 
-// employees.employment_status enum (001_initial_core_hr_hierarchy.up.sql). Never part of
-// employeeCreateSchema -- a new hire always starts 'active' (the column default); only
-// update can transition it.
+// employees.employment_status enum (001_initial_core_hr_hierarchy.up.sql). An update may set any of
+// the four. A CREATE may set only 'active' or 'inactive' (D35): a pre-provisioned inactive account is
+// legitimate, but a brand-new hire cannot sensibly start terminated or on leave.
 const employmentStatusSchema = z.enum(["active", "inactive", "on_leave", "terminated"]);
+const creatableEmploymentStatusSchema = z.enum(["active", "inactive"]);
 
 const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be an ISO calendar date (YYYY-MM-DD)");
 const nonNegativeAmount = z.number().nonnegative();
@@ -27,6 +28,8 @@ export const employeeCreateSchema = z.object({
   basic: nonNegativeAmount,
   allowances: nonNegativeAmount,
   team_lead_id: uuidSchema.nullable().optional(),
+  // Optional, defaulting to 'active' in the service (D35).
+  employment_status: creatableEmploymentStatusSchema.optional(),
 }).strict();
 
 export const employeeUpdateSchema = z.object({

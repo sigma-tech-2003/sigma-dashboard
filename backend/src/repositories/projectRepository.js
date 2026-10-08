@@ -5,10 +5,16 @@ import { buildProjectScopeFilter } from "../services/projectScopeService.js";
 // JS Date at server-local midnight, which JSON-serialises a day early on any server east of UTC;
 // selecting them as text keeps reads and write responses agreeing on "YYYY-MM-DD". Same fix as
 // attendance.work_date and for the same reason.
+//
+// department_name (D33) is a scalar subquery, not a join, so every query that selects this list keeps
+// its FROM and WHERE untouched. Only admin and hr may read the departments list, but a manager, tl or
+// employee needs the NAME of the department their projects belong to; a subquery behaves as a LEFT JOIN
+// and, like one, does not filter departments.deleted_at.
 const PROJECT_COLUMNS = `
   projects.id,
   projects.company_id,
   projects.department_id,
+  (SELECT departments.name FROM departments WHERE departments.id = projects.department_id) AS department_name,
   projects.team_lead_id,
   projects.title,
   projects.description,
