@@ -484,6 +484,13 @@ describes. `deleted_by_employee_id` and its `CHECK` and index are `010`'s.)
 so the field cannot disagree with the dates it derives from. `date - date` yields an integer
 day count in Postgres, so the expression is exact and immutable.
 
+> **Superseded in part, 2026-10-07 — not yet migrated.** The expression above counts **calendar**
+> days. Management has since decided that leave is counted in **working days**, Saturday and Sunday
+> not counting, so this column will need replacing — and, because `Maternity` alone stays in calendar
+> days (112), replacing with something that depends on `type`. The migration is not written; see the amendment
+> at the end of [D31](#d31--leave-write-rules-and-entitlement--settled) for what that involves and
+> what is still undecided.
+
 `decided_by_employee_id` / `decided_at` are **new**. Firestore's `canUpdateLeave`
 (`:428-438`) permits changing only `status`, so there is no record of who approved a leave.
 Adding it is required to enforce the self-approval ban in the database at all, and is an
@@ -718,6 +725,13 @@ caller can show them apart. The balance itself — entitlement minus usage — i
 and that module, and served at `GET /api/v1/leave-balances`; see
 [D31](#d31--leave-write-rules-and-entitlement--settled). The old view's columns (`leave_year`,
 `days_used`) are gone; nothing in the code base read them.
+
+> **Superseded in part, 2026-10-07 — not yet migrated.** This view splits a leave per **calendar**
+> day, weekends included. Management has since decided that leave counts in **working days**, so the
+> per-month split needs the same treatment as the `days` column in §4.8, including counting
+> `Maternity` in calendar days. (A fourth, Eid, pool needs no change to this view: type decides every
+> pool, so Eid leave would need a leave type of its own — see D31's second amendment.) The migration is not written; see the amendment at
+> the end of [D31](#d31--leave-write-rules-and-entitlement--settled).
 
 Note this also resolves ambiguity A2 by decision: balances were stale because nothing
 decremented them. Deriving from `leaves` makes staleness structurally impossible.
@@ -1008,6 +1022,11 @@ How the pools map onto the five leave types, and how a balance is computed from 
 [D31](#d31--leave-write-rules-and-entitlement--settled). (This heading keeps its original text so
 the existing links to it from `migration-plan.md` still resolve.)
 
+> **Amended 2026-10-07:** "these three pools" is no longer the whole picture. Management has since
+> added a **fourth pool** (2 days per Eid) and made leave count in **working days**. The three
+> rules above stand as recorded; see the amendment at the end of
+> [D31](#d31--leave-write-rules-and-entitlement--settled).
+
 ### D5 — Does an approved leave in a prior year still count?
 `employee_leave_usage` groups by `date_part('year', start_date)`. A leave spanning a year
 boundary is attributed entirely to its start year. Confirm, or specify proration.
@@ -1019,6 +1038,12 @@ therefore split **per calendar day across the months it covers**, each day charg
 falls in, and to the calendar year it falls in for the 14-per-year pool. This replaces the view's
 start-year attribution. See [D31](#d31--leave-write-rules-and-entitlement--settled). (This heading
 keeps its original text so the existing links to it still resolve.)
+
+> **Amended 2026-10-07:** the leave is still split per day across months, but **only working days
+> are charged** now (Saturday and Sunday are not). The example above depends on the year: in 2026,
+> when 30 January is a Friday, 30 January to 2 February is 1 working day of January and 1 of
+> February, not 2 and 2. See the amendment at the end of
+> [D31](#d31--leave-write-rules-and-entitlement--settled).
 
 ### D6 — `role` on `users` rather than `employees`
 Firestore keeps role on the employee document. I put it on `users` (§4.2 rationale). Confirm.
@@ -1588,7 +1613,20 @@ assignees, which D29 forbids, and that their KPIs would still need a rule.
 
 Decided before Phase 9 implementation. It answers D4 with management's entitlement rules, and settles
 D5, D8 and D12 along the way. Everything here is a service-layer or API-layer rule unless it says
-otherwise. `days` stays a generated column and is never accepted from a client.
+otherwise. `days` stays a generated column and is never accepted from a client. *(Amended
+2026-10-07: a client still never supplies `days`, but the generated definition counts calendar days
+and will have to be replaced — see the amendment at the end of this entry.)*
+
+> **Amended 2026-10-07.** Management has since answered both open items below and added a rule that
+> was not captured: Maternity is **16 weeks**, leave is counted in **working days** (which
+> **supersedes** the calendar-days decision in this entry), and there is a **fourth pool**, 2 days
+> per Eid. A **second amendment** (same day) adds that Maternity's 16 weeks is **112 calendar days**,
+> that **leave type, never the date, decides the pool**, and that Eid leave therefore needs a type of
+> its own — an open question. The text below is left as it was decided, with each superseded passage
+> marked in place;
+> the [amendment at the end of this entry](#amendment-2026-10-07--maternity-working-days-and-a-fourth-pool-eid)
+> governs wherever the two disagree. Nothing in the code or the migrations has been changed to match
+> yet: as committed, they still implement the rules as originally recorded here.
 
 **The three pools and the five leave types.** The UI offers five types (`Annual`, `Sick`, `Casual`,
 `Maternity`, `Emergency`) and the enum keeps all five, so the frontend and the database vocabulary are
@@ -1599,7 +1637,7 @@ kept in a single code module, decides which pool a request draws on:
 |---|---|---|
 | `Annual`, `Casual` | the **monthly pool** | 2 per calendar month; **12 in December** (2 + the Christmas 10) |
 | `Sick`, `Emergency` | the **serious-need pool** | 14 per calendar year |
-| `Maternity` | **no pool** | uncapped — see the open item below |
+| `Maternity` | **no pool** | ~~uncapped — see the open item below~~ **16 weeks = 112 calendar days** (amended 2026-10-07) |
 
 Hajj and Umrah are applied for as `Emergency`, which is what "or similar serious need" covers. New
 enum values for them were rejected: they would be invisible in the UI until the frontend changed, and
@@ -1618,13 +1656,16 @@ management wants them editable.
   Months before the month containing `joined_on` carry no entitlement.
 
 **How a balance is computed.** A balance is derived from `leaves` at read time, never stored.
-- **Days are calendar days, inclusive**, which is what the generated `days` column already holds. A
+- ~~**Days are calendar days, inclusive**, which is what the generated `days` column already holds. A
   leave that spans a weekend therefore consumes the weekend days too. **Recorded as decided pending
   confirmation from management**, because "2 leaves a month" reads naturally as working days; counting
   working days would need a company weekend and public-holiday configuration that does not exist
-  anywhere in the repository.
+  anywhere in the repository.~~ **SUPERSEDED 2026-10-07: days are working days, not calendar days.**
+  Management confirmed the reading this bullet doubted. The company weekend is Saturday and Sunday;
+  see the amendment below. The struck text is kept so the history of the decision is not lost.
 - **A leave is split per calendar day across the months it covers** (D5), each day charged to the month
-  it falls in, and to its calendar year for the serious-need pool.
+  it falls in, and to its calendar year for the serious-need pool. *(Amended 2026-10-07: the split
+  stays per day, but only working days are charged.)*
 - **Usage is approved plus pending**: a pending request reserves its days, so requests cannot be
   stacked past the allowance. Rejected, deleted and cancelled leaves never count (§8 item 7), and a
   legacy imported leave counts by its status like any other.
@@ -1654,7 +1695,8 @@ should serve the `SET NULL` scan. There is no hard-delete path.
 
 **Checks added at write time.** Firestore had none of these.
 - A request that would exceed the balance is refused with a `409`, counting approved and pending, and
-  serialised per employee against concurrent applies. `Maternity` is exempt (outside the pools).
+  serialised per employee against concurrent applies. `Maternity` is exempt (outside the pools),
+  *(amended 2026-10-07: but it now has its own 16-week cap)*.
 - A request that overlaps the same employee's own pending or approved leave is refused with a `409`,
   since the two would charge the same days twice.
 - **Backdating is allowed** and no future limit applies, as in Firestore: sick leave is often filed
@@ -1670,11 +1712,209 @@ in the company timezone. `start_date`, `end_date` and `applied_on` are returned 
 the same date fix made for attendance, payroll and projects. The request carries the type, the two
 dates and the reason; nothing else is accepted.
 
-**Open items.**
-- **Maternity** is outside the pools and uncapped as an **interim**, because none of management's three
+**Open items, as originally recorded — both resolved 2026-10-07; see the amendment below.**
+- ~~**Maternity** is outside the pools and uncapped as an **interim**, because none of management's three
   rules mentions it, in the same spirit as D25. Management needs to supply a figure; until then a
-  maternity request is approval-gated and nothing more.
-- **Working-day counting** is recorded as calendar days pending management's confirmation, as above.
+  maternity request is approval-gated and nothing more.~~ **Resolved: 16 weeks.**
+- ~~**Working-day counting** is recorded as calendar days pending management's confirmation, as above.~~
+  **Resolved, and it overturned the recorded decision: leave is counted in working days.**
+
+#### Amendment (2026-10-07) — Maternity, working days and a fourth pool (Eid)
+
+As relayed by the project owner on 2026-10-07, reporting management's answers, and recorded as given.
+**No implementation, migration or code change accompanies this amendment.** It changes what the system
+is *supposed* to do; what it does is unchanged (see "Status of what exists" below).
+
+**1. Maternity: 16 weeks.** Maternity stays outside the **monthly and annual (serious-need) pools**, as
+management stated, but it is **no longer uncapped**: management gave **16 weeks**, which they state
+matches Pakistan's Maternity Benefit Act. This closes the Maternity item under the original open items
+and ends the interim recorded for it. *(Updated by the second amendment below: the 16 weeks is
+measured in **112 calendar days**, and Maternity's relationship to the Eid pool is moot because the
+type, not the date, decides the pool. Still open: whether the cap is per request, per birth or per
+year — section 6.)*
+
+**2. Working days replace calendar days — this supersedes the earlier decision.** The company weekend is
+**Saturday and Sunday**, and weekend days **do not count against any pool**. *(One exception, added by
+the second amendment below: `Maternity` is counted in calendar days.)* This overturns the
+calendar-days bullet earlier in this entry, which is marked superseded in place, dated, and left legible.
+The rest of how a balance is computed stands: derived at read time and never stored; a leave is split
+per day across the months it covers (D5), now counting only working days; usage is approved plus
+pending; rejected and deleted leave never counts.
+
+A worked example, with the dates the Phase 9 tests and end-to-end script use: 30 January to 2 February
+2026 is a Friday, Saturday, Sunday and Monday. Counted in calendar days that is 2 days of January and 2
+of February; counted in working days it is **1 and 1**. A leave consisting only of a Saturday and a
+Sunday has **no** chargeable days (for every type except `Maternity`; an open question below).
+
+What this requires — none of it done:
+- **The generated `days` column on `leaves`** (§4.8; `end_date - start_date + 1`) computes calendar days
+  and will need **replacing**. A generated column can read only its own row: it can count the weekdays
+  between two dates, which is enough for a Saturday/Sunday rule, but it cannot read a table. If
+  non-Eid public holidays are excluded later, or if the Eid ranges below had to influence the count, a
+  generated column would not be enough. Whether `days` stays generated is therefore tied to the open
+  public-holiday question in section 4. (The type-dependence for `Maternity` added by the second
+  amendment does not change this: a generated column can read its own row's `type`.)
+- **The per-month split in `employee_leave_usage`** (§4.12) emits one row per calendar day and so counts
+  weekends; it needs the same treatment.
+- **A migration** will carry both. It must be a new one, never an edit to `001`–`010`, and **it is not
+  written.**
+- **Code and tests that encode calendar days** — `daysBetweenInclusive`, `splitDaysByMonth` and
+  `findOverage` in `leaveEntitlements.js`, and the unit tests and end-to-end script that pin the
+  calendar-day numbers — will have to follow. The frontend also counts calendar days for itself when a
+  leave is applied (`LeavePage.jsx`), which is a frontend item for
+  [Phase 10](migration-plan.md#phase-10--frontend-cutover).
+
+**3. A fourth pool: Eid.** This rule was not captured when D4 and D31 were written.
+- **2 days per Eid**, for both **Eid-ul-Fitr** and **Eid-ul-Azha**, so **4 per year**.
+- It is **separate from and additional to** the monthly pool: a month that contains an Eid can yield **4
+  days** (the monthly 2 plus the Eid 2).
+- It is usable **only around Eid itself**, not at any time of year.
+- **The dates cannot be computed.** Eid moves each year and depends on the moon. Management's answer is
+  that an **admin enters the Eid date ranges for each year**, ~~and that **leave falling inside a recorded
+  range draws on the Eid pool**~~ *(withdrawn 2026-10-07: that was an inference, and it was wrong — the
+  date range never reassigns a request to a pool; see the second amendment)*. (Management said "an
+  admin"; whether `hr` may enter them too was not discussed.)
+- **There is nowhere to store those ranges, and nothing for it exists today.** It needs a new table
+  holding, at minimum, the year, which Eid, and the first and last date of the range, and therefore a
+  new migration. **Neither is written.** The allowance itself (2 per Eid) belongs with the other
+  numbers in `leaveEntitlements.js`; only the ranges are data.
+- Eid is recorded here as **2 per Eid occasion**, so each Eid has its own 2, and not as one pool of 4
+  usable at either. That is the plain reading of "usable only around Eid itself", but it is a reading;
+  see the open questions.
+- ~~Because a balance is derived at read time, **a recorded range reclassifies leave retroactively**:
+  entering, editing or deleting a range after leave already exists changes how that leave is charged,
+  and so can change the balances of leave that was already approved.~~ **SUPERSEDED 2026-10-07:** a
+  range no longer decides how leave is charged, so it cannot reclassify anything; see the second
+  amendment.
+- ~~This is a different kind of rule from the other three. The type-to-pool map routes a request by its
+  **leave type**; the Eid pool routes by **date**. How the two combine is an open question.~~
+  **SUPERSEDED 2026-10-07:** the Eid pool does not route by date. Type decides every pool, so the
+  question is not how the two rules combine but how a request says it is Eid leave at all; see the
+  second amendment.
+
+**4. Public holidays beyond Eid: not discussed, and undecided.** Management's answers covered the
+Saturday/Sunday weekend and the Eid pool, and nothing else. Whether other public holidays — and the Eid
+days themselves, if they are public holidays — are excluded from the count, or charged as ordinary
+working days, was **not discussed**. Until it is decided the rule is exactly what was stated: only
+Saturday and Sunday do not count. If public holidays are excluded later they would need a table of
+their own, like the Eid ranges, and that would settle the question about the generated `days` column
+above.
+
+**5. Status of what exists.** Migration `010`, `leaveEntitlements.js`, the leave endpoints and the Phase 9
+tests and end-to-end script, all committed, implement the rules as originally recorded: three pools,
+calendar days, Maternity uncapped. They are consistent with one another and pass; they **no longer match
+management's rules**, and nothing in this amendment changes them. The end-to-end script verified the
+usage view against calendar-day numbers, which will need re-deriving once the view changes. There is no
+production leave data to re-count: the Firestore data was never real production use
+([migration-plan.md](migration-plan.md), 2026-09-21 updates) and the migration branch is not deployed. A
+fourth pool and a Maternity cap also change what `GET /leave-balances` returns (two pools today) and
+what the balance cards could show, which bears on
+[D39](#d39--response-shape-and-leave-balance-presentation).
+
+**6. Open questions.** Settled by this amendment: Maternity's figure (16 weeks), working days, the
+weekend (Saturday and Sunday), and the existence and size of the Eid pool. *(Revised by the second
+amendment below: items it resolves are struck through rather than removed.)* **Not settled:**
+
+- **An Eid leave request when no range has been entered for that year — open.** *(Restated by the
+  second amendment. The first amendment's form of this question — treat it as ordinary leave, or
+  refuse all leave for the year — assumed a recorded range routes a request to the Eid pool. It does
+  not, so that form no longer applies.)* Ranges now only constrain **when Eid leave may be taken**, so
+  a year with no recorded range has nothing to check an Eid request against. The realistic outcomes
+  are: **(a) refuse Eid requests for that year until an admin has entered its ranges** — which blocks
+  Eid leave only, not leave in general; or **(b) accept them unconstrained** — which defeats "usable
+  only around Eid". Both presuppose that an Eid request can be recognised as one, which is the next
+  open question. *Recommendation, not settled:* (a), with some admin-visible way to tell that a year
+  has no ranges yet.
+- **Whether to add an Eid leave type, or find another way — open** (second amendment, item E).
+- **Public holidays beyond Eid — undecided** (section 4).
+- ~~**Eid versus the type-to-pool map.** Management said leave inside a recorded range draws on the Eid
+  pool. Not covered: whether `Sick`, `Emergency` or `Maternity` leave inside a range draws on the Eid
+  pool too, or stays on its own; and what happens to working days inside a range **beyond the 2** (a
+  range wider than two days is plausible) — whether they spill into the monthly pool or are refused.~~
+  **Resolved by the second amendment:** type decides the pool and the date never does, so `Sick` and
+  `Emergency` stay on the 14 and `Annual` and `Casual` on the monthly pool wherever they fall. The
+  "beyond the 2" question does not arise either: an Eid request that would exceed its pool is refused
+  as over-balance, like any other pool (D31's existing rule, unchanged).
+- **A request with no working days** (a Saturday-and-Sunday-only range), **for every type except
+  `Maternity`**: accepted as a request that charges nothing, or refused. (`Maternity` counts calendar
+  days, so such a request charges 2 days.)
+- ~~**How Maternity's 16 weeks is measured.** As calendar time (16 × 7 = 112 days) or as working days
+  under the new rule (80), and whether the cap applies **per request, per birth or per year**.~~
+  **Measurement resolved by the second amendment: 112 calendar days.** **Still open:** whether the cap
+  applies **per request, per birth or per year**.
+- **Whether the Eid 2 are per occasion** (recorded above) or one pool of 4 usable at either. If per
+  occasion, a day's Eid occasion (Fitr or Azha) has to come from the recorded range it falls in, which
+  is a use of the ranges the second amendment leaves open.
+
+#### Second amendment (2026-10-07) — Maternity in calendar days; type decides the pool; Eid needs a type
+
+As relayed by the project owner, reporting three further answers from management, and recorded as
+given. Like the first, **it carries no implementation, migration or code change.** It also corrects one
+inference made in the first amendment (item C).
+
+**A. Maternity's 16 weeks is 112 calendar days, weekends included** — not working days, which would be
+80. It is the **one exception to the working-days rule**, because maternity is a continuous period of
+leave and not a count of days taken. Consequences, recorded and not done:
+- The working-days rule in section 2 therefore applies to every leave type **except `Maternity`**.
+  This does not conflict with "weekend days do not count against any pool", because Maternity draws on
+  no pool; it is measured against its own 112-day cap.
+- The generated `days` column and the usage view's per-month split become **type-dependent**: weekdays
+  for `Annual`, `Sick`, `Casual` and `Emergency`, every calendar day for `Maternity`. A generated column
+  can read the other columns of its own row, so `days` can still be generated — but it is no longer a
+  function of the two dates alone. (The view already carries `type`.)
+- A Saturday-and-Sunday-only `Maternity` request charges 2 days; the "no working days" question in
+  section 6 concerns the other four types only.
+- Not answered: whether the 112 days is the cap **per request, per birth or per year** (section 6).
+
+**B. Leave type decides the pool; the date never does.** Management's answers: a `Sick` or `Emergency`
+request that falls inside an Eid range still draws on the 14-per-year pool, and an `Annual` or `Casual`
+request inside an Eid range still draws on the monthly pool, not the Eid pool. Eid, sick and annual
+leave are **kept separate**, and a date range never reassigns a request to a different pool.
+
+**C. This corrects the first amendment.** Section 3 recorded that "leave falling inside a recorded range
+draws on the Eid pool". That was an inference and it was wrong; it is struck through there, together
+with the two bullets that depended on it (retroactive reclassification, and the Eid pool routing "by
+date"). What section 3 says about the Eid allowance itself — 2 per Eid, 4 a year, additional to the
+monthly 2, usable only around Eid — about the dates not being computable and an admin entering them,
+and about the storage that does not yet exist, stands.
+
+**D. Consequence — recorded as a consequence, not a decision: Eid leave needs a type of its own.** If the
+pool is decided entirely by type, a request can draw on the Eid pool only if its type says so, and none
+of the five existing types can: `Annual` and `Casual` are the monthly pool and `Sick` and `Emergency`
+the serious-need pool (both just confirmed), and `Maternity` draws on no pool. The type-to-pool map in
+the table above has no place for the Eid pool, and the pool cannot be reached at all until there is a
+way to say "this request is Eid leave" that is not the dates. It follows that:
+- The admin-entered Eid ranges **can no longer be what routes a request to the Eid pool.** At most they
+  **constrain when Eid leave may be taken**: an Eid request is valid only inside a recorded range. If
+  the 2 days are per occasion, the range is also the only record of **which** Eid a day belongs to.
+- A recorded range no longer changes how existing leave is **charged**, since the type has already
+  decided that, so the retroactive-reclassification risk from the first amendment goes away. A range
+  edited or deleted after Eid leave exists could however leave **already-approved Eid leave outside any
+  range**; how to treat that is not decided.
+- The stored ranges are still needed — a new table and so a new migration, neither written — but for
+  validation, not routing.
+
+**E. Open question — add an Eid leave type, or find another way?** Not decided. The realistic options:
+- **(a) Add a sixth value to the `leave_type` enum** (for example `Eid`), by a new migration using
+  `ALTER TYPE leave_type ADD VALUE`. Consequences: Postgres has no command to remove an enum value, so
+  the migration's down file could not cleanly reverse it without recreating the type (to be checked at
+  implementation); the frontend **cannot show or submit it until it is updated** — `LeavePage.jsx`
+  hard-codes its type list, the default `Annual` and a literal set of `<option>` elements — which is a
+  UI change under the frozen-UI rule in `AGENTS.md` (the D20 question again); and the type-to-pool map
+  in `leaveEntitlements.js`, the `types` object that `GET /leave-balances` returns and the balance cards
+  ([D39](#d39--response-shape-and-leave-balance-presentation)) each gain an entry. It also ends this
+  entry's statement that "the enum keeps all five" types.
+- **(b) A pool field on the request instead of a new type.** No enum change, but a new column on
+  `leaves` and a new field in the UI — which is the objection D31 already raised against having the
+  employee pick a pool.
+- **(c) Reuse an existing type: not possible** under the answers above, since each of the five already
+  has a pool, or none.
+- **(d) Defer.** The Eid pool stays unreachable, and the 4 days a year unavailable, until this is
+  decided.
+
+*Recommendation, not settled:* **(a)**, timed with [Phase 10](migration-plan.md#phase-10--frontend-cutover),
+since the leave page is being reworked for the cutover anyway, and after confirming with management
+that Eid leave is a distinct kind of leave to them and what it should be called.
 
 ---
 
