@@ -6,12 +6,14 @@ import { createApp } from "../src/app.js";
 import { createLeaveBalanceService } from "../src/services/leaveBalanceService.js";
 import { createLeaveMutationService } from "../src/services/leaveMutationService.js";
 import { HttpError } from "../src/utils/httpError.js";
+import { LEAVE_TYPES } from "../src/utils/leaveTypes.js";
 import { USER_ROLES } from "../src/utils/roles.js";
 
-// HTTP-level. The authorization matrix lives in leaveAuthorization.test.js, the orchestration in
-// leaveMutationService.test.js and the rules in leaveEntitlements.test.js; these tests prove the real
-// services are wired to real HTTP status codes and bodies, that the strict schemas guard the door, and
-// that /leave-balances scopes as D31 settled -- against fake repositories (no database).
+// HTTP-level. The authorization matrix lives in leaveAuthorization.test.js and the orchestration in
+// leaveMutationService.test.js; these tests prove the real services are wired to real HTTP status codes
+// and bodies, that the strict schemas guard the door, that /leave-balances scopes as D31 settled and
+// reports days TAKEN (D40: there are no entitlements and no limits) -- against fake repositories (no
+// database).
 //
 // Two refusals are DATABASE constraints or guards: the self-decision (leaves_no_self_approval) and
 // the guarded UPDATEs that make a decided leave immutable. A fake repository cannot prove the
@@ -51,9 +53,8 @@ function leaveRow(overrides = {}) {
   };
 }
 
-const usageRow = (type, year, month, approved, pending = 0) => ({
-  type, usage_year: year, usage_month: month, days_approved: approved, days_pending: pending,
-});
+/** A row of employee_leave_usage as leaveRepository.daysTaken returns it. */
+const takenRow = (type, daysUsed) => ({ type, days_used: daysUsed });
 
 /**
  * Mirrors the real repository's contract. `decide` mirrors the two database guarantees -- a decider
@@ -61,14 +62,14 @@ const usageRow = (type, year, month, approved, pending = 0) => ({
  * pending is refused 409 (the guarded UPDATE) -- so the HTTP mapping of the real refusals is
  * exercised; it is a mirror, not the proof (see the header).
  */
-function fakeLeaveRepository(seed = [], { joinedOn = "2020-01-01", usage = [], overlapping = [] } = {}) {
+function fakeLeaveRepository(seed = [], { taken = [], overlapping = [] } = {}) {
   const byId = new Map(seed.map((row) => [row.id, row]));
-  const calls = { create: [], decide: [], deleteById: [], balanceInputs: [] };
+  const calls = { create: [], decide: [], deleteById: [], daysTaken: [] };
   return {
     calls,
     async findByIdForWrite(id) { return byId.get(id) ?? null; },
     async create(input, validate) {
-      await validate({ joinedOn, overlapping, usage });
+      await validate({ overlapping });
       calls.create.push(input);
       return { id: randomUUID(), ...input, status: "pending", days: 1 };
     },
@@ -90,9 +91,9 @@ function fakeLeaveRepository(seed = [], { joinedOn = "2020-01-01", usage = [], o
         throw new HttpError(409, "leave_already_decided", "A decided leave request cannot be cancelled.");
       }
     },
-    async balanceInputs(employeeId, years) {
-      calls.balanceInputs.push({ employeeId, years });
-      return { joinedOn, usage };
+    async daysTaken(employeeId, year) {
+      calls.daysTaken.push({ employeeId, year });
+      return taken;
     },
   };
 }
@@ -328,31 +329,8 @@ test("DELETE /leaves/:id: a tl and a manager can cancel their OWN pending leave,
 });
 
 // ---------------------------------------------------------------------------
-// Over-balance and overlap refusals, through HTTP
+// The overlap refusal, and the absence of any other (D40), through HTTP
 // ---------------------------------------------------------------------------
-
-test("POST /leaves: over the monthly allowance is 409 leave_balance_exceeded with the numbers in details", async () => {
-  await withApp(principalFor("employee"), fakeLeaveRepository([], { usage: [usageRow("Annual", 2026, 3, 1, 1)] }), async (app, repository) => {
-    const response = await app.request("POST", "/api/v1/leaves", VALID_APPLY);
-
-    assert.equal(response.status, 409);
-    assert.equal(response.body.error.code, "leave_balance_exceeded");
-    assert.deepEqual(response.body.error.details, {
-      pool: "monthly", period: { year: 2026, month: 3 }, entitlement: 2, used: 2, requested: 2, remaining: 0,
-    });
-    assert.equal(repository.calls.create.length, 0);
-  });
-});
-
-test("POST /leaves: over the 14-day serious-need allowance is 409, naming the yearly pool", async () => {
-  await withApp(principalFor("employee"), fakeLeaveRepository([], { usage: [usageRow("Sick", 2026, 1, 14)] }), async (app) => {
-    const response = await app.request("POST", "/api/v1/leaves", { ...VALID_APPLY, type: "Emergency" });
-
-    assert.equal(response.status, 409);
-    assert.equal(response.body.error.details.pool, "serious_need");
-    assert.deepEqual(response.body.error.details.period, { year: 2026 });
-  });
-});
 
 test("POST /leaves: an overlapping leave is 409 leave_overlaps, carrying the existing id", async () => {
   const existing = randomUUID();
@@ -366,32 +344,45 @@ test("POST /leaves: an overlapping leave is 409 leave_overlaps, carrying the exi
   });
 });
 
-test("POST /leaves: Maternity is exempt from both pools -- a long request on full pools is 201", async () => {
-  const fullPools = [usageRow("Annual", 2026, 3, 2), usageRow("Sick", 2026, 3, 14)];
-  await withApp(principalFor("employee"), fakeLeaveRepository([], { usage: fullPools }), async (app) => {
-    const response = await app.request("POST", "/api/v1/leaves", {
-      type: "Maternity", start_date: "2026-03-01", end_date: "2026-08-31", reason: "Maternity",
+test("POST /leaves: every type is subject to the overlap rule, Maternity included", async () => {
+  for (const type of LEAVE_TYPES) {
+    await withApp(principalFor("employee"), fakeLeaveRepository([], { overlapping: [{ id: randomUUID() }] }), async (app, repository) => {
+      const response = await app.request("POST", "/api/v1/leaves", { ...VALID_APPLY, type });
+
+      assert.equal(response.status, 409, type);
+      assert.equal(response.body.error.code, "leave_overlaps", type);
+      assert.equal(repository.calls.create.length, 0, type);
     });
+  }
+});
 
-    assert.equal(response.status, 201);
+test("POST /leaves: D40 -- there is no limit on length: a 400-day request of every type is 201", async () => {
+  await withApp(principalFor("employee"), fakeLeaveRepository(), async (app) => {
+    for (const type of LEAVE_TYPES) {
+      const response = await app.request("POST", "/api/v1/leaves", {
+        type, start_date: "2026-01-01", end_date: "2027-02-04", reason: "A very long one",
+      });
+
+      assert.equal(response.status, 201, type);
+    }
   });
 });
 
-test("POST /leaves: December's allowance is 12 -- 12 days are 201, 13 are 409", async () => {
-  await withApp(principalFor("employee"), fakeLeaveRepository(), async (app) => {
-    const twelve = await app.request("POST", "/api/v1/leaves", { ...VALID_APPLY, start_date: "2026-12-01", end_date: "2026-12-12" });
-    const thirteen = await app.request("POST", "/api/v1/leaves", { ...VALID_APPLY, start_date: "2026-12-01", end_date: "2026-12-13" });
-
-    assert.equal(twelve.status, 201);
-    assert.equal(thirteen.status, 409);
-    assert.equal(thirteen.body.error.details.entitlement, 12);
+test("POST /leaves: D40 -- there is no limit on number: any number of non-overlapping requests, in a month or a year, is 201", async () => {
+  await withApp(principalFor("employee"), fakeLeaveRepository(), async (app, repository) => {
+    for (let day = 1; day <= 20; day += 1) {
+      const date = `2026-12-${String(day).padStart(2, "0")}`;
+      const response = await app.request("POST", "/api/v1/leaves", { ...VALID_APPLY, start_date: date, end_date: date });
+      assert.equal(response.status, 201, date);
+    }
+    assert.equal(repository.calls.create.length, 20);
   });
 });
 
-test("POST /leaves: a leave across a month boundary is judged per month (30 Jan - 2 Feb is 2 + 2, so it passes)", async () => {
+test("POST /leaves: D40 -- a leave across a month or year boundary is simply accepted: nothing is split or judged per period", async () => {
   await withApp(principalFor("employee"), fakeLeaveRepository(), async (app) => {
-    const response = await app.request("POST", "/api/v1/leaves", { ...VALID_APPLY, start_date: "2026-01-30", end_date: "2026-02-02" });
-    assert.equal(response.status, 201);
+    assert.equal((await app.request("POST", "/api/v1/leaves", { ...VALID_APPLY, start_date: "2026-01-30", end_date: "2026-02-02" })).status, 201);
+    assert.equal((await app.request("POST", "/api/v1/leaves", { ...VALID_APPLY, start_date: "2026-12-30", end_date: "2027-01-02" })).status, 201);
   });
 });
 
@@ -426,7 +417,6 @@ test("POST /leaves: rejects a bad type, bad or impossible dates, end before star
     { ...VALID_APPLY, reason: "   " },
     { ...VALID_APPLY, reason: "x".repeat(2001) },
     { type: "Annual", start_date: "2026-03-10", end_date: "2026-03-11" },
-    { ...VALID_APPLY, start_date: "2026-01-01", end_date: "2027-06-01" },
   ];
   await withApp(principalFor("employee"), fakeLeaveRepository(), async (app, repository) => {
     for (const body of bodies) {
@@ -437,7 +427,7 @@ test("POST /leaves: rejects a bad type, bad or impossible dates, end before star
   });
 });
 
-test("POST /leaves: backdating is allowed, and a year-long Maternity range fits the sanity bound", async () => {
+test("POST /leaves: backdating is allowed, and so is a year-long range (D40: no limits)", async () => {
   await withApp(principalFor("employee"), fakeLeaveRepository(), async (app) => {
     assert.equal((await app.request("POST", "/api/v1/leaves", { ...VALID_APPLY, start_date: "2020-01-06", end_date: "2020-01-06" })).status, 201);
     assert.equal((await app.request("POST", "/api/v1/leaves", {
@@ -510,14 +500,15 @@ test("the write routes require authentication, like every other route", async ()
 // GET /leave-balances: scoping for the employee and for each approver role
 // ---------------------------------------------------------------------------
 
-test("GET /leave-balances: an employee gets their own balance by default (200)", async () => {
+test("GET /leave-balances: an employee gets their own days taken by default (200), for today's year", async () => {
   await withApp(principalFor("employee", { employeeId: E1 }), fakeLeaveRepository(), async (app, repository) => {
     const response = await app.request("GET", "/api/v1/leave-balances");
 
     assert.equal(response.status, 200);
     assert.equal(response.body.data.employee_id, E1);
     assert.equal(response.body.data.as_of, "2026-03-04");
-    assert.deepEqual(repository.calls.balanceInputs, [{ employeeId: E1, years: [2026] }]);
+    assert.equal(response.body.data.year, 2026);
+    assert.deepEqual(repository.calls.daysTaken, [{ employeeId: E1, year: 2026 }]);
   });
 });
 
@@ -527,7 +518,7 @@ test("GET /leave-balances: an employee cannot read a colleague's -- same team, o
       const response = await app.request("GET", `/api/v1/leave-balances?employee_id=${target}`);
 
       assert.equal(response.status, 404, target);
-      assert.equal(repository.calls.balanceInputs.length, 0, target);
+      assert.equal(repository.calls.daysTaken.length, 0, target);
     });
   }
 });
@@ -587,23 +578,28 @@ test("GET /leave-balances: a bad query is 400 -- a malformed employee_id, a bad 
   });
 });
 
-test("GET /leave-balances: the body is the two pools for as_of's month and year, with the type map and Maternity on no pool", async () => {
-  const usage = [usageRow("Annual", 2026, 3, 1, 1), usageRow("Sick", 2026, 2, 3), usageRow("Maternity", 2026, 3, 31)];
-  await withApp(principalFor("employee", { employeeId: E1 }), fakeLeaveRepository([], { usage }), async (app) => {
-    const { body } = await app.request("GET", "/api/v1/leave-balances?as_of=2026-03-20");
+test("GET /leave-balances: the body is days TAKEN per type for as_of's year -- all five types, a total, and nothing remaining", async () => {
+  const taken = [takenRow("Annual", 5), takenRow("Sick", 3), takenRow("Maternity", 112)];
+  await withApp(principalFor("employee", { employeeId: E1 }), fakeLeaveRepository([], { taken }), async (app, repository) => {
+    const { body } = await app.request("GET", "/api/v1/leave-balances?as_of=2025-03-20");
 
-    assert.deepEqual(body.data.pools.monthly, { period: { year: 2026, month: 3 }, entitlement: 2, approved: 1, pending: 1, remaining: 0 });
-    assert.deepEqual(body.data.pools.serious_need, { period: { year: 2026 }, entitlement: 14, approved: 3, pending: 0, remaining: 11 });
-    assert.equal(body.data.types.Maternity, null);
-    assert.equal(body.data.types.Annual, "monthly");
-    assert.equal(body.data.types.Emergency, "serious_need");
+    assert.deepEqual(body.data, {
+      employee_id: E1,
+      as_of: "2025-03-20",
+      year: 2025,
+      taken: { Annual: 5, Sick: 3, Casual: 0, Maternity: 112, Emergency: 0 },
+      total: 120,
+    });
+    assert.deepEqual(repository.calls.daysTaken, [{ employeeId: E1, year: 2025 }], "only the year of as_of is used");
   });
 });
 
-test("GET /leave-balances: December reports an allowance of 12", async () => {
-  await withApp(principalFor("employee", { employeeId: E1 }), fakeLeaveRepository(), async (app) => {
-    const { body } = await app.request("GET", "/api/v1/leave-balances?as_of=2026-12-05");
-    assert.equal(body.data.pools.monthly.entitlement, 12);
+test("GET /leave-balances: D40 -- no pool, allowance, entitlement or remaining figure appears, however much was taken", async () => {
+  await withApp(principalFor("employee", { employeeId: E1 }), fakeLeaveRepository([], { taken: [takenRow("Annual", 60)] }), async (app) => {
+    const { body } = await app.request("GET", "/api/v1/leave-balances");
+
+    assert.deepEqual(Object.keys(body.data).sort(), ["as_of", "employee_id", "taken", "total", "year"]);
+    assert.equal(body.data.taken.Annual, 60);
   });
 });
 

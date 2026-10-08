@@ -6,19 +6,17 @@ import {
   assertCanDecideRole,
   resolveDeleteMode,
 } from "./leaveAuthorizationService.js";
-import { findOverage } from "./leaveEntitlements.js";
 
 /**
- * Orchestrates leave apply / decide / delete (D31). Who may do what is
- * leaveAuthorizationService.js; how much leave an employee has, and which leave type draws on which
- * pool, is leaveEntitlements.js. What this owns is the order of operations and the two refusals the
- * database cannot express: a request that overlaps the employee's own pending or approved leave, and
- * one that would exceed a pool.
+ * Orchestrates leave apply / decide / delete (D31, D40). Who may do what is
+ * leaveAuthorizationService.js. What this owns is the order of operations and the one refusal the
+ * database cannot express: a request that overlaps the employee's own pending or approved leave.
+ *
+ * There is no entitlement and no limit (D40): approval is the only control, so nothing here refuses a
+ * request for being too long or too many.
  *
  * Deliberately NOT here: the self-approval ban. leaves_no_self_approval is a database constraint
- * (D8) and leaveRepository turns its violation into a clean 403; and no balance re-check at approval,
- * because a pending request already counts against the balance, so approving it changes nothing and
- * rejecting it only frees days.
+ * (D8) and leaveRepository turns its violation into a clean 403.
  *
  * @param {object} dependencies
  * @param {string} dependencies.timeZone - IANA zone that defines "today" (COMPANY_TIMEZONE).
@@ -28,9 +26,9 @@ export function createLeaveMutationService({ leaveRepository, timeZone, now = ()
   return Object.freeze({
     /**
      * Applies for leave -- for the acting principal only, whatever role they hold. `applied_on` is the
-     * server's: today in the company timezone, never client-supplied. The checks run inside the
+     * server's: today in the company timezone, never client-supplied. The overlap check runs inside the
      * repository's transaction, under a lock on the applicant's employee row, so two concurrent
-     * requests cannot both pass against the same usage.
+     * requests for the same dates cannot both pass it.
      */
     async applyLeave(principal, input) {
       assertCanApply(principal);
@@ -44,25 +42,13 @@ export function createLeaveMutationService({ leaveRepository, timeZone, now = ()
           reason: input.reason,
           applied_on: todayInTimeZone(now(), timeZone),
         },
-        async ({ joinedOn, overlapping, usage }) => {
+        async ({ overlapping }) => {
           if (overlapping.length > 0) {
             throw new HttpError(
               409,
               "leave_overlaps",
               "This request overlaps another pending or approved leave of yours.",
               { existing_id: overlapping[0].id },
-            );
-          }
-
-          const overage = findOverage({
-            type: input.type, startDate: input.start_date, endDate: input.end_date, joinedOn, usage,
-          });
-          if (overage) {
-            throw new HttpError(
-              409,
-              "leave_balance_exceeded",
-              `This request would exceed your ${overage.pool === "monthly" ? "monthly" : "yearly serious-need"} allowance.`,
-              overage,
             );
           }
         },

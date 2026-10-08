@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createLeaveMutationService } from "../src/services/leaveMutationService.js";
 import { HttpError } from "../src/utils/httpError.js";
+import { LEAVE_TYPES } from "../src/utils/leaveTypes.js";
 import { USER_ROLES } from "../src/utils/roles.js";
 
 // No database. A fake repository stands in for leaveRepository and runs the service's `validate`
-// callback the way the real one does, so the orchestration -- gate, then the callback's refusals,
+// callback the way the real one does, so the orchestration -- gate, then the callback's refusal,
 // then the write -- is exercised. The authorization matrix is leaveAuthorization.test.js; the SQL is
 // leaveRepository.test.js; the real locks and constraints are scripts/e2e-leaves.js.
+//
+// D40: there are no entitlements and no limits. The only thing that can refuse an application is the
+// overlap check, and the tests below say so in both directions -- the refusal, and the absence of any
+// other.
 
 const DEPARTMENT = "dept-1";
 const OTHER_DEPARTMENT = "dept-2";
@@ -18,24 +23,21 @@ const principalFor = (role, overrides = {}) => ({
   userId: "user-id", employeeId: role === "tl" ? TL : "principal-emp", role, departmentId: DEPARTMENT, ...overrides,
 });
 
-const usageRow = (type, year, month, approved, pending = 0) => ({
-  type, usage_year: year, usage_month: month, days_approved: approved, days_pending: pending,
-});
-
 /** A leave as findByIdForWrite returns it. */
 const leave = (overrides = {}) => ({
   id: "leave-1", employee_id: EMPLOYEE, status: "pending",
   employee_department_id: DEPARTMENT, employee_team_lead_id: TL, ...overrides,
 });
 
-function fakeRepository({ joinedOn = "2020-01-01", overlapping = [], usage = [], leaves = [], decideResult, decideError } = {}) {
+function fakeRepository({ overlapping = [], leaves = [], decideResult, decideError } = {}) {
   const byId = new Map(leaves.map((row) => [row.id, row]));
   const calls = { create: [], findByIdForWrite: [], decide: [], deleteById: [] };
   return {
     calls,
     async create(input, validate) {
+      // Exactly what the real create hands the service: the overlapping leaves, and nothing else.
+      await validate({ overlapping });
       calls.create.push(input);
-      await validate({ joinedOn, overlapping, usage });
       return { id: "new-leave", ...input, status: "pending" };
     },
     async findByIdForWrite(id) {
@@ -126,34 +128,11 @@ test("applyLeave: the overlap refusal is 409 leave_overlaps and names the existi
   assert.deepEqual(error.details, { existing_id: "existing-leave" });
 });
 
-test("applyLeave: overlap is checked BEFORE the balance -- an overlapping over-balance request reports the overlap", async () => {
-  const repository = fakeRepository({ overlapping: [{ id: "existing-leave" }], usage: [usageRow("Annual", 2026, 3, 2)] });
-  const error = await rejection(serviceFor(repository).applyLeave(principalFor("employee"), APPLY));
+test("applyLeave: the refusal is an HttpError, so the error handler shapes it and nothing is a 500", async () => {
+  const error = await rejection(serviceFor(fakeRepository({ overlapping: [{ id: "existing-leave" }] }))
+    .applyLeave(principalFor("employee"), APPLY));
 
-  assert.equal(error?.code, "leave_overlaps");
-});
-
-test("applyLeave: an over-balance request is 409 leave_balance_exceeded with the pool, period and numbers", async () => {
-  const repository = fakeRepository({ usage: [usageRow("Annual", 2026, 3, 1, 1)] });
-  const error = await rejection(serviceFor(repository).applyLeave(principalFor("employee"), APPLY));
-
-  assert.equal(error?.statusCode, 409);
-  assert.equal(error.code, "leave_balance_exceeded");
-  assert.deepEqual(error.details, {
-    pool: "monthly", period: { year: 2026, month: 3 }, entitlement: 2, used: 2, requested: 2, remaining: 0,
-  });
-  assert.match(error.message, /monthly/);
-});
-
-test("applyLeave: the serious-need refusal is worded for the yearly pool", async () => {
-  const repository = fakeRepository({ usage: [usageRow("Sick", 2026, 1, 14)] });
-  const error = await rejection(serviceFor(repository).applyLeave(
-    principalFor("employee"), { ...APPLY, type: "Emergency", start_date: "2026-06-01", end_date: "2026-06-01" },
-  ));
-
-  assert.equal(error?.code, "leave_balance_exceeded");
-  assert.equal(error.details.pool, "serious_need");
-  assert.match(error.message, /serious-need/);
+  assert.ok(error instanceof HttpError);
 });
 
 test("applyLeave: a refused request never reaches the insert -- the repository's own write runs only after validate passes", async () => {
@@ -161,64 +140,52 @@ test("applyLeave: a refused request never reaches the insert -- the repository's
   const inserted = [];
   const repository = {
     async create(input, validate) {
-      await validate({ joinedOn: "2020-01-01", overlapping: [], usage: [usageRow("Annual", 2026, 3, 2)] });
+      await validate({ overlapping: [{ id: "existing-leave" }] });
       inserted.push(input);
     },
   };
   const error = await rejection(serviceFor(repository).applyLeave(principalFor("employee"), APPLY));
 
-  assert.equal(error?.code, "leave_balance_exceeded");
+  assert.equal(error?.code, "leave_overlaps");
   assert.equal(inserted.length, 0);
 });
 
-test("applyLeave: Maternity is exempt from both pools, however long and however full they are", async () => {
-  const fullPools = [usageRow("Annual", 2026, 3, 2), usageRow("Sick", 2026, 3, 14)];
-  const repository = fakeRepository({ usage: fullPools });
+test("applyLeave: every leave type is subject to the overlap rule -- Maternity is not exempt from double-booking", async () => {
+  for (const type of LEAVE_TYPES) {
+    const repository = fakeRepository({ overlapping: [{ id: "existing-leave" }] });
+    const error = await rejection(serviceFor(repository).applyLeave(
+      principalFor("employee"), { type, start_date: "2026-03-01", end_date: "2026-08-31", reason: "Long one" },
+    ));
 
-  const result = await serviceFor(repository).applyLeave(
-    principalFor("employee"), { type: "Maternity", start_date: "2026-03-01", end_date: "2026-08-31", reason: "Maternity" },
-  );
-
-  assert.equal(result.status, "pending");
-  assert.equal(repository.calls.create.length, 1);
+    assert.equal(error?.code, "leave_overlaps", type);
+    assert.equal(repository.calls.create.length, 0, type);
+  }
 });
 
-test("applyLeave: Maternity is still subject to the overlap rule -- exempt from the pools, not from double-booking", async () => {
-  const repository = fakeRepository({ overlapping: [{ id: "existing-leave" }] });
-  const error = await rejection(serviceFor(repository).applyLeave(
-    principalFor("employee"), { type: "Maternity", start_date: "2026-03-01", end_date: "2026-08-31", reason: "Maternity" },
-  ));
+// ---- D40: no entitlements, no limits ---------------------------------------------------------
 
-  assert.equal(error?.code, "leave_overlaps");
+test("applyLeave: D40 -- there is no limit on length: a 400-day request of every type is accepted", async () => {
+  for (const type of LEAVE_TYPES) {
+    const repository = fakeRepository();
+    const result = await serviceFor(repository).applyLeave(
+      principalFor("employee"), { type, start_date: "2026-01-01", end_date: "2027-02-04", reason: "A very long one" },
+    );
+
+    assert.equal(result.status, "pending", type);
+    assert.equal(repository.calls.create.length, 1, type);
+  }
 });
 
-test("applyLeave: December's allowance is 12 -- 12 days pass, 13 are refused", async () => {
-  const twelve = { type: "Casual", start_date: "2026-12-01", end_date: "2026-12-12", reason: "Break" };
-  const thirteen = { ...twelve, end_date: "2026-12-13" };
+test("applyLeave: D40 -- there is no limit on number: any number of non-overlapping requests in one month is accepted", async () => {
+  const repository = fakeRepository();
+  const service = serviceFor(repository);
 
-  assert.equal((await serviceFor(fakeRepository()).applyLeave(principalFor("employee"), twelve)).status, "pending");
+  for (let day = 1; day <= 28; day += 1) {
+    const date = `2026-03-${String(day).padStart(2, "0")}`;
+    await service.applyLeave(principalFor("employee"), { type: "Annual", start_date: date, end_date: date, reason: "One day" });
+  }
 
-  const error = await rejection(serviceFor(fakeRepository()).applyLeave(principalFor("employee"), thirteen));
-  assert.equal(error?.code, "leave_balance_exceeded");
-  assert.equal(error.details.entitlement, 12);
-});
-
-test("applyLeave: a leave across a month boundary is judged per month -- 2 + 2 passes, and a full second month refuses it", async () => {
-  const spanning = { type: "Annual", start_date: "2026-01-30", end_date: "2026-02-02", reason: "Trip" };
-
-  assert.equal((await serviceFor(fakeRepository()).applyLeave(principalFor("employee"), spanning)).status, "pending");
-
-  const error = await rejection(serviceFor(fakeRepository({ usage: [usageRow("Annual", 2026, 2, 1)] }))
-    .applyLeave(principalFor("employee"), spanning));
-  assert.equal(error?.code, "leave_balance_exceeded");
-  assert.deepEqual(error.details.period, { year: 2026, month: 2 });
-});
-
-test("applyLeave: the refusals are HttpErrors, so the error handler shapes them and nothing is a 500", async () => {
-  const error = await rejection(serviceFor(fakeRepository({ usage: [usageRow("Annual", 2026, 3, 2)] }))
-    .applyLeave(principalFor("employee"), APPLY));
-
-  assert.ok(error instanceof HttpError);
+  assert.equal(repository.calls.create.length, 28, "all 28 one-day requests in the same month went in");
 });
 
 // ---------------------------------------------------------------------------
@@ -310,12 +277,15 @@ test("decideLeave: a leave deleted between the lookup and the write is 404, not 
   assert.equal(error?.statusCode, 404);
 });
 
-test("decideLeave: no balance is read -- approving a pending request changes no usage, so there is nothing to re-check", async () => {
-  // The fake has no usage reader at all; deciding must therefore not need one.
+test("decideLeave: deciding does only the lookup and the guarded write -- nothing is created, re-checked or deleted", async () => {
+  // There is no balance to re-check at approval (D40), so deciding needs nothing but the leave.
   const repository = fakeRepository({ leaves: [leave()] });
   await serviceFor(repository).decideLeave(principalFor("admin"), "leave-1", { status: "approved" });
 
+  assert.equal(repository.calls.findByIdForWrite.length, 1);
+  assert.equal(repository.calls.decide.length, 1);
   assert.equal(repository.calls.create.length, 0);
+  assert.equal(repository.calls.deleteById.length, 0);
 });
 
 // ---------------------------------------------------------------------------

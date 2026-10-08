@@ -121,3 +121,74 @@ test("010 down: drops the view before the column's dependents, then the index, c
   assert.ok(sql.indexOf("DROP CONSTRAINT") < sql.indexOf("DROP COLUMN"));
   assert.match(sql, /DELETE FROM schema_migrations WHERE id = '010_leave_deleted_by_and_usage_view'/);
 });
+
+// ---------------------------------------------------------------------------
+// 011 (D40): restores employee_leave_usage to its pre-010 shape. 010 is applied and is never edited, so
+// the pool-era view it created is still described, accurately, by the tests above; 011 supersedes it.
+// ---------------------------------------------------------------------------
+
+const UP_011 = "011_restore_leave_usage_view.up.sql";
+const DOWN_011 = "011_restore_leave_usage_view.down.sql";
+const viewBody = (sql) => sql.slice(sql.indexOf("CREATE VIEW employee_leave_usage"))
+  .replace(/GROUP BY 1, 2, 3, 4;[\s\S]*$/, "GROUP BY 1, 2, 3, 4;")
+  .split(";")[0].replace(/\s+/g, " ").trim();
+
+test("011 up: drops the view and creates it again -- CREATE OR REPLACE cannot change a view's columns", async () => {
+  const sql = stripComments(await read(UP_011));
+
+  assert.match(sql, /DROP VIEW employee_leave_usage;/);
+  assert.match(sql, /CREATE VIEW employee_leave_usage AS/);
+  assert.doesNotMatch(sql, /CREATE OR REPLACE VIEW/);
+  assert.ok(sql.indexOf("DROP VIEW") < sql.indexOf("CREATE VIEW"));
+});
+
+test("011 up: the view's definition is 001's, character for character apart from whitespace", async () => {
+  const original = stripComments(await read("001_initial_core_hr_hierarchy.up.sql"));
+  const restored = stripComments(await read(UP_011));
+  const body = (sql) => sql.slice(sql.indexOf("CREATE VIEW employee_leave_usage")).split(";")[0].replace(/\s+/g, " ").trim();
+
+  assert.equal(body(restored), body(original));
+});
+
+test("011 up: exposes exactly employee_id, type, leave_year and days_used -- and none of 010's per-month columns", async () => {
+  const sql = stripComments(await read(UP_011));
+  const view = sql.slice(sql.indexOf("CREATE VIEW"));
+
+  assert.match(view, /SELECT employee_id,\s+type,\s+date_part\('year', start_date\)::int AS leave_year,\s+sum\(days\) AS days_used/);
+  assert.doesNotMatch(view, /usage_year|usage_month|days_approved|days_pending|generate_series/);
+});
+
+test("011 up: counts approved, undeleted leave only, grouped by employee, type and the year the leave starts in", async () => {
+  const sql = stripComments(await read(UP_011));
+
+  assert.match(sql, /WHERE status = 'approved' AND deleted_at IS NULL/);
+  assert.doesNotMatch(sql, /'pending'|'rejected'/);
+  assert.match(sql, /GROUP BY employee_id, type, date_part\('year', start_date\)/);
+});
+
+test("011 up: touches only the view -- no table, column, constraint or index", async () => {
+  const sql = stripComments(await read(UP_011));
+
+  assert.doesNotMatch(sql, /ALTER TABLE|CREATE TABLE|DROP TABLE|ADD COLUMN|DROP COLUMN|CREATE INDEX|DROP INDEX|ADD CONSTRAINT|DROP CONSTRAINT/);
+  assert.doesNotMatch(sql, /deleted_by_employee_id/, "010's deleter column, CHECK and index are left alone");
+  assert.equal((sql.match(/DROP VIEW/g) ?? []).length, 1);
+  assert.equal((sql.match(/CREATE VIEW/g) ?? []).length, 1);
+});
+
+test("011 down: puts back 010's per-month view exactly, so a rollback returns to the state 010 left", async () => {
+  const restored = stripComments(await read(DOWN_011));
+  const original = stripComments(await read(UP));
+
+  assert.match(restored, /DROP VIEW IF EXISTS employee_leave_usage;/);
+  assert.equal(viewBody(restored), viewBody(original));
+  assert.match(restored, /usage_year/);
+  assert.match(restored, /generate_series/);
+});
+
+test("011 down: clears its own ledger row, guarded against a missing ledger table, and touches nothing else", async () => {
+  const sql = stripComments(await read(DOWN_011));
+
+  assert.match(sql, /DELETE FROM schema_migrations WHERE id = '011_restore_leave_usage_view'/);
+  assert.match(sql, /to_regclass\('public\.schema_migrations'\) IS NOT NULL/);
+  assert.doesNotMatch(sql, /ALTER TABLE|DROP COLUMN|DROP INDEX|DROP CONSTRAINT/, "010's deleter column stays when only 011 is rolled back");
+});

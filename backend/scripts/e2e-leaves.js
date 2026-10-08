@@ -2,24 +2,28 @@
  * End-to-end check of the Phase 9 leave write endpoints and the leave-balance endpoint against a
  * REAL PostgreSQL database: the real container, repositories, services and routes (over HTTP), with
  * only authentication stubbed. The unit tests run against fakes and cannot see SQL, locks,
- * constraint names, the replaced employee_leave_usage view or pg's date and integer types; this can.
+ * constraint names, the employee_leave_usage view or pg's date and integer types; this can.
  *
  *   node scripts/e2e-leaves.js --confirm-database=sigma_hrm_scratch
  *
  * Requires --confirm-database like every other write script in this repo, and refuses under
  * NODE_ENV=production. It needs the same backend/.env the API does (DATABASE_URL,
- * AUTH_TOKEN_SECRET, COMPANY_TIMEZONE), and migration 010 already applied (`npm run db:migrate`).
+ * AUTH_TOKEN_SECRET, COMPANY_TIMEZONE), and migration 011 already applied (`npm run db:migrate`).
  *
  * It writes: departments, users, employees and leaves, all tagged `p9e2e-<random>`. Everything it
  * creates is deleted again in a `finally`, found by that tag rather than by remembered ids, so a run
  * that dies half-way through seeding still cleans up. It never touches a row it did not create.
  * Exits non-zero if any check fails.
  *
- * Among other things it proves, against the real database: that migration 010's view produces the
- * right per-calendar-month numbers for leaves that span month, year and leap-day boundaries; that the
- * per-employee FOR NO KEY UPDATE lock really serialises concurrent applies (a burst, and a holder
- * transaction) without blocking other tables' foreign-key checks; that the self-approval ban is the
- * DATABASE's; and that the guarded UPDATEs make a decided leave immutable under a real race.
+ * D40: there are no leave entitlements and no limits, so approval is the only control. This script
+ * proves, against the real database: that migration 011 restored employee_leave_usage to the shape
+ * it had before 010 (approved leave, per type, per calendar year, attributed whole to the year it
+ * starts in) and that the days-taken endpoint reads it correctly, including pg's bigint-as-string;
+ * that NOTHING but an overlap can refuse an application (length, number, type and calendar position
+ * are all unlimited); that the per-employee FOR NO KEY UPDATE lock really serialises concurrent
+ * applies so the overlap check cannot be raced, without blocking other tables' foreign-key checks;
+ * that the self-approval ban is the DATABASE's; and that the guarded UPDATEs make a decided leave
+ * immutable under a real race.
  */
 
 import { randomUUID } from "node:crypto";
@@ -30,7 +34,6 @@ import { createApp } from "../src/app.js";
 import { getCompanyTimezone } from "../src/config/env.js";
 import { getContainer, resetContainer } from "../src/container.js";
 import { closePool, getPool } from "../src/db/pool.js";
-import { splitDaysByMonth } from "../src/services/leaveEntitlements.js";
 import { todayInTimeZone } from "../src/utils/companyDate.js";
 
 function parseArgs(argv) {
@@ -90,15 +93,15 @@ async function run(pool, tag) {
       "INSERT INTO departments (company_id, name) VALUES ($1, $2) RETURNING id", [company.id, `${tag}-${suffix}`]);
     return row.id;
   };
-  const person = async (label, role, departmentId, { teamLeadId = null, joinedOn = "2024-01-01" } = {}) => {
+  const person = async (label, role, departmentId, { teamLeadId = null } = {}) => {
     const { rows: [user] } = await pool.query(
       "INSERT INTO users (company_id, email, role) VALUES ($1, $2, $3) RETURNING id",
       [company.id, `${tag}-${label}@example.invalid`, role]);
     const { rows: [employee] } = await pool.query(
       `INSERT INTO employees (user_id, company_id, department_id, team_lead_id, employee_number, full_name, position_title,
                               joined_on, employment_status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'E2E', $7, 'active') RETURNING id`,
-      [user.id, company.id, departmentId, teamLeadId, `${tag}-${label}`, `${tag} ${label}`, joinedOn]);
+       VALUES ($1, $2, $3, $4, $5, $6, 'E2E', '2024-01-01', 'active') RETURNING id`,
+      [user.id, company.id, departmentId, teamLeadId, `${tag}-${label}`, `${tag} ${label}`]);
     const made = { userId: user.id, employeeId: employee.id, role, departmentId };
     principals[label] = made;
     return made;
@@ -117,16 +120,10 @@ async function run(pool, tag) {
   const e2 = await person("e2", "employee", deptA, { teamLeadId: tl1.employeeId });
   const e3 = await person("e3", "employee", deptA, { teamLeadId: tl2.employeeId });
   const eB = await person("eB", "employee", deptB, { teamLeadId: tlB.employeeId });
-  // One employee per scenario, so no scenario's usage can leak into another's numbers.
+  // One employee per scenario, so no scenario's leave can leak into another's numbers.
   const eView = await person("eView", "employee", deptA, { teamLeadId: tl1.employeeId });
-  const eSpan = await person("eSpan", "employee", deptA, { teamLeadId: tl1.employeeId });
-  const eDec = await person("eDec", "employee", deptA, { teamLeadId: tl1.employeeId });
-  const eDec2 = await person("eDec2", "employee", deptA, { teamLeadId: tl1.employeeId });
-  const eNov = await person("eNov", "employee", deptA, { teamLeadId: tl1.employeeId });
-  const eSN = await person("eSN", "employee", deptA, { teamLeadId: tl1.employeeId });
-  const eSN2 = await person("eSN2", "employee", deptA, { teamLeadId: tl1.employeeId });
-  const eSN3 = await person("eSN3", "employee", deptA, { teamLeadId: tl1.employeeId });
-  const eNew = await person("eNew", "employee", deptA, { teamLeadId: tl1.employeeId, joinedOn: "2026-06-15" });
+  const eLong = await person("eLong", "employee", deptA, { teamLeadId: tl1.employeeId });
+  const eTaken = await person("eTaken", "employee", deptA, { teamLeadId: tl1.employeeId });
   const eRej = await person("eRej", "employee", deptA, { teamLeadId: tl1.employeeId });
   const eProm = await person("eProm", "employee", deptA, { teamLeadId: tl1.employeeId });
   const eRace1 = await person("eRace1", "employee", deptA, { teamLeadId: tl1.employeeId });
@@ -137,7 +134,7 @@ async function run(pool, tag) {
   principals.noEmployee = { userId: randomUUID(), employeeId: null, role: "admin", departmentId: null };
 
   // -------------------------------------------------------------------------
-  // Migration 010's schema, against what Postgres actually generated
+  // The schema, against what Postgres actually generated
   // -------------------------------------------------------------------------
   const { rows: foreignKeys } = await pool.query(
     `SELECT c.conname, a.attname AS column_name, c.confdeltype
@@ -168,16 +165,16 @@ async function run(pool, tag) {
     `SELECT column_name, data_type, udt_name FROM information_schema.columns
      WHERE table_name = 'employee_leave_usage' ORDER BY ordinal_position`);
   console.info(`employee_leave_usage columns as generated: ${viewColumns.map((c) => `${c.column_name}:${c.udt_name}`).join(", ")}`);
-  check("the replaced view has exactly employee_id, type, usage_year, usage_month, days_approved, days_pending, in that order",
-    showing(viewColumns.map((c) => c.column_name)) === showing(["employee_id", "type", "usage_year", "usage_month", "days_approved", "days_pending"]),
+  check("the restored view has exactly employee_id, type, leave_year, days_used, in that order (migration 011 = the pre-010 shape)",
+    showing(viewColumns.map((c) => c.column_name)) === showing(["employee_id", "type", "leave_year", "days_used"]),
     showing(viewColumns.map((c) => c.column_name)));
-  check("...typed uuid, leave_type, then four integers (int4, so pg hands back JS numbers, not strings)",
-    showing(viewColumns.map((c) => c.udt_name)) === showing(["uuid", "leave_type", "int4", "int4", "int4", "int4"]), showing(viewColumns.map((c) => c.udt_name)));
+  check("...typed uuid, leave_type, int4, then int8: days_used is sum(integer), a BIGINT, which pg hands back as a string",
+    showing(viewColumns.map((c) => c.udt_name)) === showing(["uuid", "leave_type", "int4", "int8"]), showing(viewColumns.map((c) => c.udt_name)));
   try {
-    await pool.query("SELECT leave_year FROM employee_leave_usage LIMIT 1");
-    record("001's view columns are gone (leave_year)", false, "the query succeeded");
+    await pool.query("SELECT usage_month FROM employee_leave_usage LIMIT 1");
+    record("010's per-month columns are gone (usage_month)", false, "the query succeeded");
   } catch (error) {
-    check("001's view columns are gone (leave_year -> 42703 undefined_column)", error.code === "42703", `${error.code}`);
+    check("010's per-month columns are gone (usage_month -> 42703 undefined_column)", error.code === "42703", `${error.code}`);
   }
 
   // -------------------------------------------------------------------------
@@ -206,9 +203,10 @@ async function run(pool, tag) {
     const apply = (as, type, start, end = start, extra = {}) =>
       call(as, "POST", "/leaves", { type, start_date: start, end_date: end, reason: "e2e", ...extra });
     const errorOf = (response) => `${response.status} ${response.body?.error?.code}`;
+    // The view as pg returns it RAW: days_used arrives as a string (bigint).
     const viewRows = async (employeeId) => (await pool.query(
-      "SELECT * FROM employee_leave_usage WHERE employee_id = $1 ORDER BY type, usage_year, usage_month", [employeeId])).rows;
-    const asKeys = (rows) => rows.map((row) => `${row.type}|${row.usage_year}|${row.usage_month}|${row.days_approved}|${row.days_pending}`);
+      "SELECT type::text AS type, leave_year, days_used FROM employee_leave_usage WHERE employee_id = $1 ORDER BY type, leave_year", [employeeId])).rows;
+    const asKeys = (rows) => rows.map((row) => `${row.type}|${row.leave_year}|${row.days_used}`);
     const balance = async (as, query = "") => (await call(as, "GET", `/leave-balances${query}`));
     const rawLeave = async (employeeId, type, start, end, status = "pending", { deleted = false } = {}) => {
       const { rows: [row] } = await pool.query(
@@ -225,91 +223,52 @@ async function run(pool, tag) {
     };
 
     // ======================================================================
-    // THE REPLACED VIEW, against real Postgres: per-month numbers for leaves that span boundaries
+    // THE RESTORED VIEW (migration 011), against real Postgres
     // ======================================================================
-    // Raw inserts (bypassing the API, so the view is judged on its own). Every expected row below is
-    // worked out by hand from the calendar, not by the code under test.
-    await rawLeave(eView.employeeId, "Annual", "2026-01-30", "2026-02-02", "approved");   // Jan 2, Feb 2
-    await rawLeave(eView.employeeId, "Annual", "2026-02-26", "2026-03-01", "pending");    // Feb 3 (26,27,28), Mar 1
-    await rawLeave(eView.employeeId, "Annual", "2026-01-05", "2026-01-05", "approved");   // Jan +1 (a second leave in the same month)
-    await rawLeave(eView.employeeId, "Casual", "2026-12-30", "2027-01-02", "approved");   // Dec 2 | Jan 2 -- a year boundary
-    await rawLeave(eView.employeeId, "Sick", "2028-02-28", "2028-03-01", "approved");     // LEAP year: Feb 28+29 = 2 | Mar 1
-    await rawLeave(eView.employeeId, "Sick", "2027-03-10", "2027-03-10", "pending");      // one day
-    await rawLeave(eView.employeeId, "Maternity", "2026-08-01", "2026-10-31", "approved"); // Aug 31, Sep 30, Oct 31
-    await rawLeave(eView.employeeId, "Annual", "2026-04-29", "2026-06-02", "approved");   // Apr 2, May 31, Jun 2 -- spans THREE boundaries
-    await rawLeave(eView.employeeId, "Annual", "2026-09-01", "2026-09-01", "pending");    // Sep: pending 1 ...
-    await rawLeave(eView.employeeId, "Annual", "2026-09-10", "2026-09-11", "approved");   // ... and approved 2, one grouped row
-    await rawLeave(eView.employeeId, "Emergency", "2026-05-01", "2026-05-10", "rejected"); // rejected: never counts
-    await rawLeave(eView.employeeId, "Annual", "2026-07-01", "2026-07-05", "approved", { deleted: true }); // soft-deleted: never counts
-    await rawLeave(eView.employeeId, "Annual", "2026-02-10", "2026-02-11", "pending", { deleted: true });  // would corrupt Feb if it counted
+    // Raw inserts (bypassing the API, so the view is judged on its own). Every expected number is worked
+    // out by hand from the calendar, not by the code under test.
+    await rawLeave(eView.employeeId, "Annual", "2026-03-02", "2026-03-04", "approved");     // 3 days
+    await rawLeave(eView.employeeId, "Annual", "2026-05-11", "2026-05-11", "approved");     // +1: same type and year, ONE grouped row
+    await rawLeave(eView.employeeId, "Annual", "2026-12-30", "2027-01-02", "approved");     // 4 days; STARTS in 2026, so all 4 count in 2026
+    await rawLeave(eView.employeeId, "Casual", "2027-01-04", "2027-01-05", "approved");     // 2
+    await rawLeave(eView.employeeId, "Sick", "2028-02-28", "2028-03-01", "approved");       // 3: a leap year, 28 and 29 Feb and 1 Mar
+    await rawLeave(eView.employeeId, "Maternity", "2026-08-01", "2026-11-20", "approved");  // 31 + 30 + 31 + 20 = 112 CALENDAR days
+    await rawLeave(eView.employeeId, "Sick", "2026-04-01", "2026-04-10", "pending");        // excluded: pending
+    await rawLeave(eView.employeeId, "Emergency", "2026-05-01", "2026-05-10", "rejected");  // excluded: rejected
+    await rawLeave(eView.employeeId, "Annual", "2026-07-01", "2026-07-05", "approved", { deleted: true }); // excluded: soft-deleted
 
-    const expectedView = [
-      "Annual|2026|1|3|0",   // 30,31 Jan (leave 1) + 5 Jan
-      "Annual|2026|2|2|3",   // 1,2 Feb approved (leave 1) + 26,27,28 Feb pending
-      "Annual|2026|3|0|1",   // 1 Mar pending
-      "Annual|2026|4|2|0",   // 29,30 Apr
-      "Annual|2026|5|31|0",  // all of May
-      "Annual|2026|6|2|0",   // 1,2 Jun
-      "Annual|2026|9|2|1",   // approved 10,11 and pending 1, grouped into ONE row
-      "Casual|2026|12|2|0",
-      "Casual|2027|1|2|0",
-      "Maternity|2026|10|31|0",
-      "Maternity|2026|8|31|0",
-      "Maternity|2026|9|30|0",
-      "Sick|2027|3|0|1",
-      "Sick|2028|2|2|0",     // 2028 is a leap year: 28 and 29 February
-      "Sick|2028|3|1|0",
-    ];
-    const actualRows = await viewRows(eView.employeeId);
-    const actualKeys = asKeys(actualRows);
-    if (!sameSet(actualKeys, expectedView)) {
-      console.info(`view expected: ${showing([...expectedView].sort())}\nview actual:   ${showing([...actualKeys].sort())}`);
-    }
-    check("VIEW: the per-employee, per-type, per-month rows are exactly the hand-computed set", sameSet(actualKeys, expectedView),
-      `missing: ${showing(expectedView.filter((key) => !actualKeys.includes(key)))} unexpected: ${showing(actualKeys.filter((key) => !expectedView.includes(key)))}`);
-    const cell = (type, year, month) => actualRows.find((row) => row.type === type && row.usage_year === year && row.usage_month === month);
-    check("VIEW: 30 Jan - 2 Feb (approved) is 2 days in JANUARY and 2 in FEBRUARY, not 4 in January (the boundary the 001 view got wrong)",
-      cell("Annual", 2026, 1)?.days_approved === 3 && cell("Annual", 2026, 2)?.days_approved === 2, showing([cell("Annual", 2026, 1), cell("Annual", 2026, 2)]));
-    check("VIEW: 26 Feb - 1 Mar (pending) is 3 days in February and 1 in March, with approved and pending in separate columns",
-      cell("Annual", 2026, 2)?.days_pending === 3 && cell("Annual", 2026, 3)?.days_pending === 1 && cell("Annual", 2026, 3)?.days_approved === 0, showing(cell("Annual", 2026, 3)));
-    check("VIEW: 30 Dec - 2 Jan crosses a YEAR: usage_year 2026 month 12 and usage_year 2027 month 1",
-      cell("Casual", 2026, 12)?.days_approved === 2 && cell("Casual", 2027, 1)?.days_approved === 2, showing([cell("Casual", 2026, 12), cell("Casual", 2027, 1)]));
-    check("VIEW: 28 Feb - 1 Mar 2028 knows the LEAP day: 2 days in February, 1 in March",
-      cell("Sick", 2028, 2)?.days_approved === 2 && cell("Sick", 2028, 3)?.days_approved === 1, showing([cell("Sick", 2028, 2), cell("Sick", 2028, 3)]));
-    check("VIEW: a leave spanning three months (29 Apr - 2 Jun) is 2 + 31 + 2",
-      cell("Annual", 2026, 4)?.days_approved === 2 && cell("Annual", 2026, 5)?.days_approved === 31 && cell("Annual", 2026, 6)?.days_approved === 2, "");
-    check("VIEW: rejected leaves never count (no Emergency row)", !actualRows.some((row) => row.type === "Emergency"), "");
-    check("VIEW: soft-deleted leaves never count (no July row; February holds only the live numbers)",
-      !actualRows.some((row) => row.usage_month === 7) && cell("Annual", 2026, 2)?.days_pending === 3, "");
-    check("VIEW: Maternity IS in the view (it is a usage fact); only the code's pool map exempts it",
-      cell("Maternity", 2026, 8)?.days_approved === 31, "");
-    check("VIEW: every number is a JS number, not a string (int4, not bigint)",
-      actualRows.every((row) => ["usage_year", "usage_month", "days_approved", "days_pending"].every((column) => typeof row[column] === "number")), showing(actualRows[0]));
-
-    const { rows: [{ leaves_days: leavesDays }] } = await pool.query(
-      `SELECT COALESCE(sum(days), 0)::int AS leaves_days FROM leaves
-       WHERE employee_id = $1 AND status IN ('approved', 'pending') AND deleted_at IS NULL`, [eView.employeeId]);
-    const viewDays = actualRows.reduce((sum, row) => sum + row.days_approved + row.days_pending, 0);
-    check(`VIEW: the days it splits add back up to leaves.days (the generated column): ${viewDays} = ${leavesDays}`, viewDays === leavesDays, `${viewDays} vs ${leavesDays}`);
-
-    // The JS split the apply path uses must agree with what the view computes, leave by leave.
-    const { rows: liveLeaves } = await pool.query(
-      `SELECT type, status, to_char(start_date, 'YYYY-MM-DD') AS s, to_char(end_date, 'YYYY-MM-DD') AS e FROM leaves
-       WHERE employee_id = $1 AND status IN ('approved', 'pending') AND deleted_at IS NULL`, [eView.employeeId]);
-    const jsTally = new Map();
-    for (const leave of liveLeaves) {
-      for (const part of splitDaysByMonth(leave.s, leave.e)) {
-        const key = `${leave.type}|${part.year}|${part.month}`;
-        const entry = jsTally.get(key) ?? { approved: 0, pending: 0 };
-        entry[leave.status] += part.days;
-        jsTally.set(key, entry);
-      }
-    }
-    check("VIEW: it agrees, row for row, with splitDaysByMonth (the code that checks the allowance)",
-      sameSet([...jsTally].map(([key, value]) => `${key}|${value.approved}|${value.pending}`), actualKeys), "");
-
-    // Replaced, not additive: other employees are untouched by eView's leaves.
-    check("VIEW: another employee has no rows from eView's leaves", (await viewRows(e3.employeeId)).length === 0, "");
+    const expectedView = ["Annual|2026|8", "Casual|2027|2", "Maternity|2026|112", "Sick|2028|3"];
+    const viewNow = await viewRows(eView.employeeId);
+    check("VIEW: per employee, type and year, exactly the hand-computed rows", sameSet(asKeys(viewNow), expectedView),
+      `expected ${showing(expectedView)} got ${showing(asKeys(viewNow))}`);
+    check("VIEW: three approved leaves of one type and year are summed into ONE row (3 + 1 + 4 = 8)",
+      viewNow.filter((row) => row.type === "Annual" && row.leave_year === 2026).length === 1 && Number(viewNow.find((row) => row.type === "Annual")?.days_used) === 8, showing(viewNow));
+    check("VIEW: a leave is attributed WHOLE to the year it starts in: 30 Dec - 2 Jan counts 4 days in 2026 and leaves no 2027 Annual row",
+      !viewNow.some((row) => row.type === "Annual" && row.leave_year === 2027), showing(viewNow));
+    check("VIEW: days are calendar days, weekends included, and a leap year is known (28 Feb - 1 Mar 2028 = 3)",
+      Number(viewNow.find((row) => row.type === "Sick" && row.leave_year === 2028)?.days_used) === 3, showing(viewNow));
+    check("VIEW: Maternity is 112 calendar days across four months",
+      Number(viewNow.find((row) => row.type === "Maternity")?.days_used) === 112, showing(viewNow));
+    check("VIEW: pending, rejected and soft-deleted leave are never counted (no Emergency row; no 2026 Sick row; Annual is 8, not 13)",
+      !viewNow.some((row) => row.type === "Emergency") && !viewNow.some((row) => row.type === "Sick" && row.leave_year === 2026)
+      && Number(viewNow.find((row) => row.type === "Annual")?.days_used) === 8, showing(viewNow));
+    check("VIEW control: read RAW through pg, days_used is a STRING (bigint) and leave_year a number -- which is why the repository casts",
+      typeof viewNow[0]?.days_used === "string" && typeof viewNow[0]?.leave_year === "number", showing(viewNow[0]));
+    const throughRepository = await container.leaveRepository.daysTaken(eView.employeeId, 2026);
+    check("VIEW: through leaveRepository.daysTaken, days_used arrives as a NUMBER (the ::int cast)",
+      Array.isArray(throughRepository) && throughRepository.length === 2
+      && throughRepository.every((row) => typeof row.days_used === "number")
+      && throughRepository.find((row) => row.type === "Annual")?.days_used === 8
+      && throughRepository.find((row) => row.type === "Maternity")?.days_used === 112, showing(throughRepository));
+    const { rows: [{ approved_days: approvedDays }] } = await pool.query(
+      `SELECT COALESCE(sum(days), 0)::int AS approved_days FROM leaves
+       WHERE employee_id = $1 AND status = 'approved' AND deleted_at IS NULL`, [eView.employeeId]);
+    const viewDays = viewNow.reduce((sum, row) => sum + Number(row.days_used), 0);
+    check(`VIEW: its days add back up to leaves.days over the approved, undeleted leave: ${viewDays} = ${approvedDays}`, viewDays === approvedDays, `${viewDays} vs ${approvedDays}`);
+    check("VIEW: another employee has no rows from eView's leave", (await viewRows(e3.employeeId)).length === 0, "");
+    check("VIEW: the year filter works -- 2027 holds only the Casual leave, and an empty year gives an empty list",
+      showing((await container.leaveRepository.daysTaken(eView.employeeId, 2027)).map((row) => row.type)) === showing(["Casual"])
+      && (await container.leaveRepository.daysTaken(eView.employeeId, 2035)).length === 0, "");
 
     // ======================================================================
     // Serialization, defaults, and the controls that show why the fixes matter
@@ -323,7 +282,7 @@ async function run(pool, tag) {
       l1?.status === "pending" && l1?.decided_by_employee_id === null && l1?.decided_at === null && l1?.reason === "Family wedding", showing(l1));
     const l1Row = await leaveRow(l1?.id);
     check("the database row agrees: the applicant is the principal, decision_recorded true, nothing deleted",
-      l1Row?.employee_id === e1.employeeId && l1Row.decision_recorded === true && l1Row.deleted_at === null && l1Row.deleted_by_employee_id === null && l1Row.days === 2, showing(l1Row));
+      l1Row?.employee_id === e1.employeeId && l1Row.decision_recorded === true && l1Row.deleted_at === null && l1Row.deleted_by_employee_id === null && l1Row.days === 2, showing(l1));
     check("control: a raw `date` column really does come back from pg as a JS Date (local-midnight), so the to_char fix matters",
       l1Row?.start_date instanceof Date && l1Row?.applied_on instanceof Date, showing(l1Row));
     check("GET /leaves/:id is not shadowed by the write router, and agrees on the dates",
@@ -358,121 +317,88 @@ async function run(pool, tag) {
       { type: "Annual", start_date: "2026-05-06", end_date: "2026-05-04", reason: "x" },
       { type: "Annual", start_date: "2026-02-30", end_date: "2026-03-01", reason: "x" },
       { type: "Annual", start_date: "2026-05-04", end_date: "2026-05-04", reason: "   " },
-      { type: "Annual", start_date: "2026-01-01", end_date: "2027-06-01", reason: "x" },
     ];
     let allBad = true;
     for (const body of badBodies) allBad &&= (await call("e1", "POST", "/leaves", body)).status === 400;
-    check("a foreign or server-owned field, a bad type, reversed or impossible dates, a blank reason and an absurd range are all 400", allBad, "");
+    check("a foreign or server-owned field, a bad type, reversed or impossible dates and a blank reason are all 400", allBad, "");
     check("...and none of them wrote a row", (await liveCount()) === beforeBad, "");
 
     // ======================================================================
-    // The balance endpoint, against the real view
+    // The overlap refusal -- the ONE thing that can refuse an application (D40)
     // ======================================================================
-    const march = await balance("e1", "?as_of=2026-03-20");
-    check("GET /leave-balances (employee, default target) -> 200 and it is their own", march.status === 200 && march.body.data.employee_id === e1.employeeId, showing(march));
-    check("a pending request reserves its days: March monthly pool is 2 entitled, 0 approved, 2 pending, 0 remaining",
-      showing(march.body?.data?.pools?.monthly) === showing({ period: { year: 2026, month: 3 }, entitlement: 2, approved: 0, pending: 2, remaining: 0 }), showing(march.body?.data?.pools));
-    check("the serious-need pool is separate and untouched: 14 entitled, 14 remaining",
-      march.body?.data?.pools?.serious_need?.entitlement === 14 && march.body.data.pools.serious_need.remaining === 14, showing(march.body?.data?.pools?.serious_need));
-    check("the response maps every type to its pool, with Maternity on none",
-      showing(march.body?.data?.types) === showing({ Annual: "monthly", Sick: "serious_need", Casual: "monthly", Maternity: null, Emergency: "serious_need" }), showing(march.body?.data?.types));
-    check("the next month starts fresh at 2 -- nothing carries forward", (await balance("e1", "?as_of=2026-04-02")).body?.data?.pools?.monthly?.remaining === 2, "");
-    check("as_of defaults to today in the company timezone", (await balance("e1")).body?.data?.as_of === today, "");
-
-    // ======================================================================
-    // Over-balance and overlap refusals
-    // ======================================================================
-    const over = await apply("e1", "Casual", "2026-03-20");
-    check("a Casual day in March, with March's 2 already reserved (Annual and Casual share one pool) -> 409 leave_balance_exceeded",
-      over.status === 409 && over.body.error.code === "leave_balance_exceeded", showing(over));
-    check("...with the pool, period and numbers in details",
-      showing(over.body?.error?.details) === showing({ pool: "monthly", period: { year: 2026, month: 3 }, entitlement: 2, used: 2, requested: 1, remaining: 0 }), showing(over.body?.error?.details));
     const overlap = await apply("e1", "Annual", "2026-03-11", "2026-03-12");
-    check("a request sharing a day with a pending leave -> 409 leave_overlaps naming it (checked before the balance)",
+    check("a request sharing a day with a pending leave -> 409 leave_overlaps naming it",
       overlap.status === 409 && overlap.body.error.code === "leave_overlaps" && overlap.body.error.details?.existing_id === l1?.id, showing(overlap));
-    check("an unrelated month, fresh: April 1-2 -> 201", (await apply("e1", "Annual", "2026-04-01", "2026-04-02")).status === 201, "");
-    const threeDays = await apply("e1", "Annual", "2026-05-04", "2026-05-06");
-    check("3 days in a fresh month -> 409 (requested 3, remaining 2)",
-      threeDays.status === 409 && threeDays.body.error.details?.requested === 3 && threeDays.body.error.details?.remaining === 2, showing(threeDays));
-    check("backdating is allowed (no future/past limit) -> 201", (await apply("e1", "Annual", "2025-01-06")).status === 201, "");
-    check("none of the refused requests wrote a row", (await pool.query(
-      "SELECT count(*)::int AS n FROM leaves WHERE employee_id = $1 AND deleted_at IS NULL", [e1.employeeId])).rows[0].n === 3, "");
-
-    // ---- Maternity: outside both pools ----
+    check("a different TYPE does not escape the overlap rule", errorOf(await apply("e1", "Sick", "2026-03-10")) === "409 leave_overlaps", "");
     const mat = await apply("e1", "Maternity", "2026-03-12", "2026-03-14");
-    check("Maternity beside a full month, adjacent but not overlapping -> 201 (exempt from the pools)", mat.status === 201, showing(mat));
-    const longMat = await apply("e1", "Maternity", "2026-06-01", "2026-08-31");
-    check("a three-month Maternity request -> 201 (far beyond any pool)", longMat.status === 201, showing(longMat));
-    check("Maternity is still refused when it overlaps another leave -> 409 leave_overlaps",
-      errorOf(await apply("e1", "Maternity", "2026-03-14", "2026-03-20")) === "409 leave_overlaps", "");
-    check("Maternity days appear in the view yet leave the pools alone: March monthly is still 2 pending, serious-need still 0",
-      (await balance("e1", "?as_of=2026-03-20")).body?.data?.pools?.monthly?.pending === 2
-      && (await balance("e1", "?as_of=2026-07-01")).body?.data?.pools?.serious_need?.pending === 0, "");
+    check("Maternity next to it, adjacent but not overlapping -> 201", mat.status === 201, showing(mat));
+    check("Maternity is not exempt from the overlap rule either -> 409", errorOf(await apply("e1", "Maternity", "2026-03-14", "2026-03-20")) === "409 leave_overlaps", "");
+    check("backdating is allowed -> 201", (await apply("e1", "Annual", "2025-01-06")).status === 201, "");
+    check("the refused requests wrote nothing: e1 holds exactly l1, the Maternity leave and the backdated one",
+      (await pool.query("SELECT count(*)::int AS n FROM leaves WHERE employee_id = $1 AND deleted_at IS NULL", [e1.employeeId])).rows[0].n === 3, "");
 
-    // ---- December is 12 ----
-    const dec12 = await apply("eDec", "Annual", "2026-12-01", "2026-12-12");
-    check("December: 12 days -> 201 (the monthly 2 plus the Christmas 10)", dec12.status === 201, showing(dec12));
-    const decMore = await apply("eDec", "Casual", "2026-12-13");
-    check("December: a 13th day, in a different Annual/Casual type -> 409 with entitlement 12 and used 12",
-      decMore.status === 409 && decMore.body.error.details?.entitlement === 12 && decMore.body.error.details?.used === 12, showing(decMore));
-    const dec13 = await apply("eDec2", "Annual", "2026-12-01", "2026-12-13");
-    check("December: 13 days in one request -> 409 (entitlement 12, requested 13)",
-      dec13.status === 409 && dec13.body.error.details?.entitlement === 12 && dec13.body.error.details?.requested === 13, showing(dec13));
-    check("the Christmas bonus is December's alone: November is back to 2 (3 days -> 409, entitlement 2)",
-      (await apply("eNov", "Annual", "2026-11-02", "2026-11-04")).body?.error?.details?.entitlement === 2, "");
-    check("the December balance reads 12 entitled, 12 pending, 0 remaining",
-      showing((await balance("admin", `?employee_id=${eDec.employeeId}&as_of=2026-12-15`)).body?.data?.pools?.monthly)
-        === showing({ period: { year: 2026, month: 12 }, entitlement: 12, approved: 0, pending: 12, remaining: 0 }), "");
+    // ======================================================================
+    // D40: NO entitlements, NO limits -- nothing but an overlap can refuse
+    // ======================================================================
+    let tenOk = true;
+    for (let day = 1; day <= 10; day += 1) {
+      tenOk &&= (await apply("eLong", "Annual", `2026-04-${String(day).padStart(2, "0")}`)).status === 201;
+    }
+    check("ten one-day requests in the SAME month (the old monthly 2) are all accepted -> 201", tenOk, "");
+    const longRequest = await apply("eLong", "Annual", "2030-01-01", "2031-02-04");
+    check("a 400-day request (beyond the old 366 sanity bound) -> 201, with days = 400",
+      longRequest.status === 201 && longRequest.body.data.days === 400, showing(longRequest));
+    check("a 365-day Maternity request (beyond the old 16 weeks) -> 201",
+      (await apply("eLong", "Maternity", "2033-01-01", "2033-12-31")).status === 201, "");
+    check("30 days of Sick and 30 of Emergency in one year (the old 14) -> 201 each",
+      (await apply("eLong", "Sick", "2032-01-01", "2032-01-30")).status === 201
+      && (await apply("eLong", "Emergency", "2032-03-01", "2032-03-30")).status === 201, "");
+    const crossing = await apply("eLong", "Casual", "2034-12-20", "2035-01-20");
+    check("a leave across a year boundary is accepted whole; nothing is split or judged per period",
+      crossing.status === 201 && crossing.body.data.days === 32, showing(crossing));
+    const weekend = await apply("eLong", "Annual", "2026-05-02", "2026-05-03");  // a Saturday and a Sunday
+    check("a Saturday-and-Sunday-only request is accepted, with days = 2: days are calendar days, the working-days rule is gone",
+      weekend.status === 201 && weekend.body.data.days === 2, showing(weekend));
 
-    // ---- a leave spanning a month boundary, through the whole stack ----
-    const spanned = await apply("eSpan", "Annual", "2026-01-30", "2026-02-02");
-    check("30 Jan - 2 Feb -> 201: judged per month (2 + 2), though 4 days would never fit one month", spanned.status === 201, showing(spanned));
-    check("VIEW (written by the API): Jan 2 pending, Feb 2 pending", showing(asKeys(await viewRows(eSpan.employeeId))) === showing(["Annual|2026|1|0|2", "Annual|2026|2|0|2"]),
-      showing(asKeys(await viewRows(eSpan.employeeId))));
-    check("the balance as of 31 Jan shows January's 2 reserved; as of 15 Feb shows February's 2; as of 1 Mar shows 0",
-      (await balance("eSpan", "?as_of=2026-01-31")).body?.data?.pools?.monthly?.pending === 2
-      && (await balance("eSpan", "?as_of=2026-02-15")).body?.data?.pools?.monthly?.pending === 2
-      && (await balance("eSpan", "?as_of=2026-03-01")).body?.data?.pools?.monthly?.pending === 0, "");
-    const spanFeb = await apply("eSpan", "Casual", "2026-02-10");
-    check("February is now full, so another February day -> 409 naming FEBRUARY as the period",
-      spanFeb.status === 409 && showing(spanFeb.body.error.details?.period) === showing({ year: 2026, month: 2 }), showing(spanFeb));
-    check("...while March, untouched, takes a day -> 201", (await apply("eSpan", "Casual", "2026-03-05")).status === 201, "");
-    const spanApproved = await call("hr", "PATCH", `/leaves/${spanned.body?.data?.id}`, { status: "approved" });
-    check("approving it moves the numbers from pending to approved in BOTH months (view)",
-      spanApproved.status === 200 && showing(asKeys(await viewRows(eSpan.employeeId)).filter((key) => key.startsWith("Annual")))
-        === showing(["Annual|2026|1|2|0", "Annual|2026|2|2|0"]), showing(asKeys(await viewRows(eSpan.employeeId))));
-    check("an approved leave still counts: February stays full (Casual Feb 11 -> 409)", errorOf(await apply("eSpan", "Casual", "2026-02-11")) === "409 leave_balance_exceeded", "");
-    const spanDeleted = await call("admin", "DELETE", `/leaves/${spanned.body?.data?.id}`);
-    check("admin deleting the approved spanning leave -> 204, and it leaves BOTH months at once (view)",
-      spanDeleted.status === 204 && !asKeys(await viewRows(eSpan.employeeId)).some((key) => key.startsWith("Annual|2026|1|") || key.startsWith("Annual|2026|2|")),
-      showing(asKeys(await viewRows(eSpan.employeeId))));
-    check("...and the freed days can be applied for again -> 201", (await apply("eSpan", "Casual", "2026-02-10")).status === 201, "");
+    // ======================================================================
+    // The days-taken endpoint, against the real (restored) view
+    // ======================================================================
+    const early = await balance("e1", "?as_of=2026-03-20");
+    check("GET /leave-balances (employee, default target) -> 200 and it is their own", early.status === 200 && early.body.data.employee_id === e1.employeeId, showing(early));
+    check("the response is employee_id, as_of, year, taken, total -- no entitlement, pool, allowance or remaining",
+      showing(Object.keys(early.body?.data ?? {}).sort()) === showing(["as_of", "employee_id", "taken", "total", "year"]), showing(early.body?.data));
+    check("all five leave types are present in `taken`, and a PENDING request is not counted: e1's pending leave shows 0",
+      sameSet(Object.keys(early.body?.data?.taken ?? {}), ["Annual", "Sick", "Casual", "Maternity", "Emergency"]) && early.body.data.total === 0, showing(early.body?.data));
+    check("as_of defaults to today in the company timezone, and its year is reported",
+      (await balance("e1")).body?.data?.as_of === today && (await balance("e1")).body?.data?.year === Number(today.slice(0, 4)), "");
 
-    // ---- the serious-need pool: 14 per calendar year ----
-    check("serious-need: 14 Sick days -> 201", (await apply("eSN", "Sick", "2026-04-01", "2026-04-14")).status === 201, "");
-    const snOver = await apply("eSN", "Emergency", "2026-09-01");
-    check("a 15th day, as Emergency (Sick and Emergency share the pool) -> 409 serious_need, period the YEAR",
-      snOver.status === 409 && snOver.body.error.details?.pool === "serious_need" && showing(snOver.body.error.details?.period) === showing({ year: 2026 })
-      && snOver.body.error.details?.used === 14, showing(snOver));
-    check("the pools are independent: with serious-need full, an Annual day is fine -> 201", (await apply("eSN", "Annual", "2026-04-20")).status === 201, "");
-    check("granted EVERY year: the next calendar year has a fresh 14 -> 201", (await apply("eSN", "Sick", "2027-04-01", "2027-04-14")).status === 201, "");
-    const sn15 = await apply("eSN2", "Sick", "2026-04-01", "2026-04-15");
-    check("15 days in one request -> 409 (requested 15, remaining 14)", sn15.status === 409 && sn15.body.error.details?.requested === 15 && sn15.body.error.details?.remaining === 14, showing(sn15));
-    check("a Sick leave across New Year (31 Dec - 2 Jan) -> 201, and each calendar year is charged only its own days",
-      (await apply("eSN3", "Sick", "2026-12-31", "2027-01-02")).status === 201
-      && (await balance("eSN3", "?as_of=2026-12-31")).body?.data?.pools?.serious_need?.pending === 1
-      && (await balance("eSN3", "?as_of=2027-01-10")).body?.data?.pools?.serious_need?.pending === 2, "");
-
-    // ---- the joined_on rules ----
-    const preJoin = await apply("eNew", "Annual", "2026-05-10");
-    check("a leave in a month BEFORE joining (joined 2026-06-15, leave 2026-05-10) -> 409 with entitlement 0",
-      preJoin.status === 409 && preJoin.body.error.details?.entitlement === 0, showing(preJoin));
-    check("the month of joining carries the full 2, unprorated, even though only 15 days remain -> 201",
-      (await apply("eNew", "Annual", "2026-06-29", "2026-06-30")).status === 201, "");
-    check("a mid-year joiner still gets the full December 12 -> 201", (await apply("eNew", "Annual", "2026-12-01", "2026-12-12")).status === 201, "");
-    check("their balance before joining shows 0 monthly entitlement; in the joining month 2",
-      (await balance("eNew", "?as_of=2026-05-10")).body?.data?.pools?.monthly?.entitlement === 0
-      && (await balance("eNew", "?as_of=2026-06-30")).body?.data?.pools?.monthly?.entitlement === 2, "");
+    // eTaken: five leaves, then decisions, then what the endpoint reports.
+    const a1 = (await apply("eTaken", "Annual", "2026-12-30", "2027-01-02")).body?.data;     // 4 days, starts in 2026
+    const s1 = (await apply("eTaken", "Sick", "2026-02-02", "2026-02-06")).body?.data;       // 5 days
+    const c1 = (await apply("eTaken", "Casual", "2026-06-01", "2026-06-10")).body?.data;     // 10 days, stays pending
+    const x1 = (await apply("eTaken", "Emergency", "2026-07-06", "2026-07-07")).body?.data;  // 2 days, will be rejected
+    const m1 = (await apply("eTaken", "Maternity", "2026-08-01", "2026-11-20")).body?.data;  // 112 days
+    const takenAt = async (asOf) => (await balance("eTaken", `?as_of=${asOf}`)).body?.data;
+    check("with five requests all PENDING, nothing is taken: every type 0, total 0", (await takenAt("2026-12-31"))?.total === 0, showing(await takenAt("2026-12-31")));
+    await call("hr", "PATCH", `/leaves/${a1?.id}`, { status: "approved" });
+    await call("hr", "PATCH", `/leaves/${s1?.id}`, { status: "approved" });
+    await call("hr", "PATCH", `/leaves/${m1?.id}`, { status: "approved" });
+    await call("manager", "PATCH", `/leaves/${x1?.id}`, { status: "rejected" });
+    const afterDecisions = await takenAt("2026-12-31");
+    check("once approved they are counted, per type: Annual 4, Sick 5, Maternity 112; the pending Casual and the rejected Emergency are 0; total 121",
+      showing(afterDecisions?.taken) === showing({ Annual: 4, Sick: 5, Casual: 0, Maternity: 112, Emergency: 0 }) && afterDecisions?.total === 121, showing(afterDecisions));
+    const nextYear = await takenAt("2027-01-10");
+    check("a leave counts in the year it STARTS in: 30 Dec - 2 Jan is 4 days in 2026 and nothing in 2027",
+      nextYear?.year === 2027 && nextYear?.total === 0, showing(nextYear));
+    check("the numbers arrive as JSON numbers, not strings", Object.values(afterDecisions?.taken ?? {}).every((days) => typeof days === "number") && typeof afterDecisions?.total === "number", "");
+    await call("admin", "DELETE", `/leaves/${s1?.id}`);
+    check("deleting an approved leave removes it from the count: Sick 0, total 116",
+      (await takenAt("2026-12-31"))?.taken?.Sick === 0 && (await takenAt("2026-12-31"))?.total === 116, showing(await takenAt("2026-12-31")));
+    await call("hr", "PATCH", `/leaves/${c1?.id}`, { status: "approved" });
+    check("approving the pending Casual leave adds its 10 days: Casual 10, total 126",
+      (await takenAt("2026-12-31"))?.taken?.Casual === 10 && (await takenAt("2026-12-31"))?.total === 126, showing(await takenAt("2026-12-31")));
+    check("the endpoint agrees with the view read directly (126 over 2026)",
+      (await viewRows(eTaken.employeeId)).filter((row) => row.leave_year === 2026).reduce((sum, row) => sum + Number(row.days_used), 0) === 126, "");
 
     // ======================================================================
     // Decide: every role, scope, immutability
@@ -519,14 +445,13 @@ async function run(pool, tag) {
       && (await call("admin", "PATCH", `/leaves/${e2Leaves.delTl?.id}`, { status: "approved", reason: "edit" })).status === 400
       && (await decidedRow(e2Leaves.delTl?.id)).status === "pending", "");
 
-    // ---- rejecting frees the days ----
+    // ---- a rejected leave does not block re-applying for the same dates ----
     await apply("eRej", "Annual", "2026-04-06", "2026-04-07");
     const rejTarget = (await pool.query("SELECT id FROM leaves WHERE employee_id = $1", [eRej.employeeId])).rows[0].id;
-    check("April is full for eRej -> a further day is 409", errorOf(await apply("eRej", "Casual", "2026-04-20")) === "409 leave_balance_exceeded", "");
+    check("while it is pending, the same dates are an overlap -> 409", errorOf(await apply("eRej", "Annual", "2026-04-06")) === "409 leave_overlaps", "");
     check("a manager rejects the pending request -> 200", (await decideAs("manager", rejTarget, "rejected")).status === 200, "");
-    check("VIEW: the rejected leave's rows are gone", (await viewRows(eRej.employeeId)).length === 0, showing(await viewRows(eRej.employeeId)));
-    check("...so the days are free again -> 201", (await apply("eRej", "Casual", "2026-04-20")).status === 201, "");
-    check("a rejected leave does not block re-applying for the same dates -> 201", (await apply("eRej", "Annual", "2026-04-06")).status === 201, "");
+    check("a REJECTED leave no longer blocks those dates -> 201", (await apply("eRej", "Annual", "2026-04-06", "2026-04-07")).status === 201, "");
+    check("and a rejected leave counts for nothing: eRej has taken 0 days", (await balance("eRej", "?as_of=2026-06-01")).body?.data?.total === 0, "");
 
     // ======================================================================
     // Self-decision: refused by the DATABASE, surfacing as 403
@@ -554,7 +479,7 @@ async function run(pool, tag) {
       errorOf(selfProm) === "403 self_approval_denied" && (await decidedRow(promLeave?.id)).status === "pending", showing(selfProm));
     check("the same leave is decidable by another manager-scope role -> 200", (await decideAs("manager", promLeave?.id, "approved")).status === 200, "");
 
-    // ---- the three raw-SQL constraints, directly ----
+    // ---- the raw-SQL constraints, directly ----
     let error = await rawError(
       "UPDATE leaves SET status = 'approved', decided_by_employee_id = employee_id, decided_at = now() WHERE id = $1", [ownLeaves.tl1?.id]);
     check("raw SQL: approving one's own leave -> 23514 leaves_no_self_approval", error?.code === "23514" && error.constraint === "leaves_no_self_approval", `${error?.code} ${error?.constraint}`);
@@ -598,6 +523,7 @@ async function run(pool, tag) {
       && !(await call("admin", "GET", "/leaves")).body.data.some((row) => row.id === e1Pending?.id)
       && (await decideAs("admin", e1Pending?.id, "approved")).status === 404
       && (await call("e1", "DELETE", `/leaves/${e1Pending?.id}`)).status === 404, "");
+    check("...and its dates are free to apply for again -> 201", (await apply("e1", "Annual", "2025-01-06")).status === 201, "");
 
     check("the employee's own APPROVED leave cannot be cancelled -> 409 leave_already_decided, row intact",
       await (async () => {
@@ -605,6 +531,8 @@ async function run(pool, tag) {
         const refused = await call("e1", "DELETE", `/leaves/${l1?.id}`);
         return approvedFirst && errorOf(refused) === "409 leave_already_decided" && (await leaveRow(l1?.id)).deleted_at === null;
       })(), "");
+    check("e1's approved March leave is now counted: 2 days of Annual in 2026",
+      (await balance("e1", "?as_of=2026-06-01")).body?.data?.taken?.Annual === 2, showing((await balance("e1", "?as_of=2026-06-01")).body?.data));
     check("the employee's own REJECTED leave cannot be cancelled either -> 409",
       errorOf(await call("e2", "DELETE", `/leaves/${e2Leaves.admin?.id}`)) === "409 leave_already_decided", "");
 
@@ -619,8 +547,6 @@ async function run(pool, tag) {
     const adminDelete = await call("admin", "DELETE", `/leaves/${e2Leaves.hr?.id}`);
     check("admin deletes an APPROVED leave -> 204, admin recorded", adminDelete.status === 204 && (await leaveRow(e2Leaves.hr?.id)).deleted_by_employee_id === admin.employeeId, showing(adminDelete));
     check("hr deletes a REJECTED leave -> 204", (await call("hr", "DELETE", `/leaves/${e2Leaves.admin?.id}`)).status === 204, "");
-    check("deleted leaves count nowhere: e2's March 2 and April 2 usage is gone from the view",
-      !asKeys(await viewRows(e2.employeeId)).some((key) => key.startsWith("Annual|2026|3|") || key.startsWith("Casual|2026|4|")), showing(asKeys(await viewRows(e2.employeeId))));
     check("a malformed id is 404 for PATCH and DELETE", (await call("admin", "DELETE", "/leaves/not-a-uuid")).status === 404 && (await decideAs("admin", "not-a-uuid", "approved")).status === 404, "");
 
     // ---- ON DELETE SET NULL on the deleter ----
@@ -644,7 +570,7 @@ async function run(pool, tag) {
     // GET /leave-balances scoping, against real employees
     // ======================================================================
     const status = async (as, targetId) => (await balance(as, `?employee_id=${targetId}`)).status;
-    check("employee: own balance 200; a colleague on the same team, another team, another department -> 404",
+    check("employee: own days taken 200; a colleague on the same team, another team, another department -> 404",
       (await status("e1", e1.employeeId)) === 200 && (await status("e1", e2.employeeId)) === 404
       && (await status("e1", e3.employeeId)) === 404 && (await status("e1", eB.employeeId)) === 404, "");
     check("tl1: their team (e1, e2) and themselves -> 200; another team's e3, another department's eB -> 404",
@@ -654,56 +580,52 @@ async function run(pool, tag) {
       (await status("manager", e1.employeeId)) === 200 && (await status("manager", e3.employeeId)) === 200 && (await status("manager", eB.employeeId)) === 404, "");
     check("admin and hr: any employee, any department -> 200",
       (await status("admin", eB.employeeId)) === 200 && (await status("hr", eB.employeeId)) === 200 && (await status("hr", e3.employeeId)) === 200, "");
+    check("an approver reads the same numbers the employee sees: hr reading eTaken gets 126 for 2026",
+      (await balance("hr", `?employee_id=${eTaken.employeeId}&as_of=2026-12-31`)).body?.data?.total === 126, "");
     check("an unknown employee_id is the same 404 as an out-of-scope one",
       errorOf(await balance("e1", `?employee_id=${randomUUID()}`)) === "404 not_found" && errorOf(await balance("e1", `?employee_id=${e3.employeeId}`)) === "404 not_found", "");
     check("a bad query is 400 (malformed employee_id, impossible as_of, an unknown parameter)",
       (await balance("admin", "?employee_id=nope")).status === 400 && (await balance("admin", "?as_of=2026-02-30")).status === 400 && (await balance("admin", "?year=2026")).status === 400, "");
-    const rawJoined = (await pool.query("SELECT joined_on FROM employees WHERE id = $1", [eNew.employeeId])).rows[0].joined_on;
-    check("control: joined_on read through pg is a JS Date, which is why the balance reads it as text",
-      rawJoined instanceof Date, showing(rawJoined));
-    check("the balance still gets joined_on right: before 2026-06-15 no monthly entitlement, from the joining month on 2",
-      (await balance("admin", `?employee_id=${eNew.employeeId}&as_of=2026-05-31`)).body?.data?.pools?.monthly?.entitlement === 0
-      && (await balance("admin", `?employee_id=${eNew.employeeId}&as_of=2026-06-01`)).body?.data?.pools?.monthly?.entitlement === 2, "");
 
     // ======================================================================
     // Real concurrency: the per-employee lock
     // ======================================================================
-    // RACE 1: a burst. 8 concurrent applies for 8 different single days of one month; the monthly
-    // pool is 2. Without the lock, READ COMMITTED lets all 8 read the same usage and all pass.
+    // RACE 1: a burst. 8 concurrent applies for 8 DIFFERENT days of one month. With no limits every one
+    // is admitted; this proves the lock serialises them without refusing, deadlocking or erroring.
+    // (It never discriminated for the lock itself -- RACE 2 and RACE 3 are the proofs of that.)
     const burstDays = [1, 2, 3, 4, 5, 6, 7, 8].map((day) => `2026-10-0${day}`);
     const burst = await Promise.all(burstDays.map((day) => apply("eRace1", "Annual", day)));
-    const burstOk = burst.filter((response) => response.status === 201).length;
-    const burstRefused = burst.filter((response) => response.status === 409 && response.body.error.code === "leave_balance_exceeded").length;
-    check(`RACE 1: 8 concurrent applies against a 2-day month admit exactly 2 (201) and refuse 6 (409 leave_balance_exceeded) -- got ${burstOk}/${burstRefused}`,
-      burstOk === 2 && burstRefused === 6, showing(burst.map((response) => response.status)));
-    check("RACE 1: the database holds exactly 2 live leaves for that month (never 3 or more)",
-      (await pool.query("SELECT count(*)::int AS n FROM leaves WHERE employee_id = $1 AND deleted_at IS NULL", [eRace1.employeeId])).rows[0].n === 2, "");
-    check("RACE 1: the view agrees -- 2 pending days in October", showing(asKeys(await viewRows(eRace1.employeeId))) === showing(["Annual|2026|10|0|2"]), showing(asKeys(await viewRows(eRace1.employeeId))));
+    check(`RACE 1: 8 concurrent applies for 8 different days are ALL admitted (201): the lock serialises, it does not refuse -- got ${showing(burst.map((r) => r.status))}`,
+      burst.every((response) => response.status === 201), showing(burst.map((r) => errorOf(r))));
+    check("RACE 1: the database holds exactly those 8 live leaves",
+      (await pool.query("SELECT count(*)::int AS n FROM leaves WHERE employee_id = $1 AND deleted_at IS NULL", [eRace1.employeeId])).rows[0].n === 8, "");
 
-    // RACE 2: identical requests. Exactly one wins; the rest are refused as overlapping.
+    // RACE 2: identical requests. Exactly one wins; the rest are refused as overlapping. Without the
+    // lock all five read "no overlap" and all five go in (shown by a control run with the lock removed).
     const same = await Promise.all([1, 2, 3, 4, 5].map(() => apply("eRace2", "Casual", "2026-11-10")));
     check("RACE 2: 5 concurrent IDENTICAL applies -> exactly one 201, four 409 leave_overlaps",
       same.filter((r) => r.status === 201).length === 1 && same.filter((r) => errorOf(r) === "409 leave_overlaps").length === 4, showing(same.map((r) => errorOf(r))));
     check("RACE 2: exactly one row exists", (await pool.query("SELECT count(*)::int AS n FROM leaves WHERE employee_id = $1", [eRace2.employeeId])).rows[0].n === 1, "");
 
-    // RACE 3: a holder transaction. Another apply for this employee is in flight (employee locked,
-    // 2 days inserted, uncommitted). A second apply must WAIT, then see those days and refuse.
+    // RACE 3: a holder transaction. Another apply for this employee is in flight (employee locked, an
+    // overlapping leave inserted, uncommitted). A second apply for overlapping dates must WAIT, then see
+    // that leave and be refused as an overlap.
     {
       const holder = await pool.connect();
       try {
         await holder.query("BEGIN");
         await holder.query("SELECT id FROM employees WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE", [eRace3.employeeId]);
-        await holder.query(
+        const { rows: [inFlight] } = await holder.query(
           `INSERT INTO leaves (employee_id, type, start_date, end_date, reason, applied_on)
-           VALUES ($1, 'Annual', '2027-03-01', '2027-03-02', 'in flight', $2)`, [eRace3.employeeId, today]);
+           VALUES ($1, 'Annual', '2027-03-01', '2027-03-02', 'in flight', $2) RETURNING id`, [eRace3.employeeId, today]);
         let settled = false;
-        const pending = apply("eRace3", "Annual", "2027-03-15").then((response) => { settled = true; return response; });
+        const pending = apply("eRace3", "Annual", "2027-03-02", "2027-03-03").then((response) => { settled = true; return response; });
         await sleep(600);
         check("RACE 3: an apply WAITS while another apply for the same employee is in flight (uncommitted)", settled === false, "it did not wait");
         await holder.query("COMMIT");
         const response = await pending;
-        check("RACE 3: once the first commits, the waiting apply sees its 2 days and refuses -> 409 leave_balance_exceeded with used 2",
-          errorOf(response) === "409 leave_balance_exceeded" && response.body.error.details?.used === 2, showing(response));
+        check("RACE 3: once the first commits, the waiting apply sees it and is refused -> 409 leave_overlaps naming the in-flight leave",
+          errorOf(response) === "409 leave_overlaps" && response.body.error.details?.existing_id === inFlight.id, showing(response));
         check("RACE 3: only the holder's row exists", (await pool.query("SELECT count(*)::int AS n FROM leaves WHERE employee_id = $1", [eRace3.employeeId])).rows[0].n === 1, "");
       } finally {
         await holder.query("ROLLBACK").catch(() => {});
@@ -830,15 +752,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       }
       console.info(`database: ${currentDatabase}`);
 
-      // Pre-flight, before anything is written and before cleanup is armed: cleanup's own SQL names
-      // the column migration 010 adds, and the whole run needs the replaced view.
+      // Pre-flight, before anything is written and before cleanup is armed: cleanup's own SQL names the
+      // column migration 010 added, and the whole run needs the view as migration 011 restored it
+      // (leave_year present, 010's usage_month gone).
       const { rows: [{ present }] } = await pool.query(
         `SELECT (SELECT count(*) FROM information_schema.columns
                  WHERE table_name = 'leaves' AND column_name = 'deleted_by_employee_id') = 1
             AND (SELECT count(*) FROM information_schema.columns
-                 WHERE table_name = 'employee_leave_usage' AND column_name = 'usage_month') = 1 AS present`,
+                 WHERE table_name = 'employee_leave_usage' AND column_name = 'leave_year') = 1
+            AND (SELECT count(*) FROM information_schema.columns
+                 WHERE table_name = 'employee_leave_usage' AND column_name = 'usage_month') = 0 AS present`,
       );
-      if (!present) throw new Error("Migration 010 is not applied to this database; run `npm run db:migrate` first.");
+      if (!present) throw new Error("Migration 011 is not applied to this database; run `npm run db:migrate` first.");
 
       seeding = true;
       const results = await run(pool, tag);

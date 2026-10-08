@@ -1,14 +1,14 @@
 import { z } from "zod";
 import { uuidSchema } from "./commonSchemas.js";
-import { LEAVE_TYPES, MAX_LEAVE_DAYS, daysBetweenInclusive } from "../services/leaveEntitlements.js";
+import { LEAVE_TYPES } from "../utils/leaveTypes.js";
 
 // z.iso.date() also rejects impossible calendar dates (2026-02-30), which a bare regex would not.
 const dateSchema = z.iso.date();
 
 // .strict() rejects any key not listed -- including employee_id (the applicant is ALWAYS the acting
 // principal, never client-supplied), days (a generated column), status, applied_on and every
-// decision field (all server-owned). Backdating is allowed and no future limit applies (D31), so the
-// only date rules are ordering and a sanity bound.
+// decision field (all server-owned). Backdating is allowed and nothing limits how long a request may be
+// or how many may be made (D40: no entitlements, no limits), so the only date rule is ordering.
 export const leaveApplySchema = z.object({
   type: z.enum(LEAVE_TYPES),
   start_date: dateSchema,
@@ -17,13 +17,7 @@ export const leaveApplySchema = z.object({
 }).strict()
   .refine((leave) => leave.end_date >= leave.start_date, {
     message: "end_date must be on or after start_date.", path: ["end_date"],
-  })
-  // Not a management rule (D31 sets none): a defensive bound, so an absurd range cannot make the usage
-  // view generate millions of rows. A year-long Maternity request fits.
-  .refine(
-    (leave) => leave.end_date < leave.start_date || daysBetweenInclusive(leave.start_date, leave.end_date) <= MAX_LEAVE_DAYS,
-    { message: `A leave request cannot span more than ${MAX_LEAVE_DAYS} days.`, path: ["end_date"] },
-  );
+  });
 
 // A decision is `{ status }` and nothing else: there is no edit (cancel and re-apply instead) and no
 // way to put a request back to pending.

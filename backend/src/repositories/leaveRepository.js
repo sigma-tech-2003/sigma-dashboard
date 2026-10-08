@@ -1,5 +1,4 @@
 import { HttpError } from "../utils/httpError.js";
-import { yearsSpannedBy } from "../services/leaveEntitlements.js";
 import { buildEmployeeScopeFilter } from "../services/employeeScopeService.js";
 
 // start_date, end_date and applied_on are formatted in SQL on purpose (D31). pg parses a `date`
@@ -23,17 +22,21 @@ const LEAVE_COLUMNS = `
   leaves.updated_at
 `;
 
-/** Rows of employee_leave_usage for one employee in the given calendar years. */
-const USAGE_SQL = `
-  SELECT type, usage_year, usage_month, days_approved, days_pending
+/**
+ * Days taken by one employee in one calendar year, per leave type (D40), from employee_leave_usage as
+ * migration 011 restored it: approved leave only, each leave attributed whole to the year it STARTS in.
+ * `days_used` is sum(integer), which is bigint, which pg returns as a string; the cast makes it a number.
+ */
+const DAYS_TAKEN_SQL = `
+  SELECT type::text AS type, days_used::int AS days_used
   FROM employee_leave_usage
-  WHERE employee_id = $1 AND usage_year = ANY($2::int[])
+  WHERE employee_id = $1 AND leave_year = $2::int
 `;
 
 /**
  * Maps a Postgres constraint violation into the same clean HttpError shape the other write
  * repositories use instead of an opaque 500. leaves_no_self_approval is a database constraint and
- * is deliberately NOT re-implemented anywhere (D8, D31): a decision by the leave's own employee
+ * is deliberately NOT re-implemented anywhere (D8, D31, D40): a decision by the leave's own employee
  * reaches it and comes back here as a clean 403. Anything not recognised -- including an HttpError
  * this repository or a service's validate callback threw -- is rethrown as-is.
  */
@@ -118,17 +121,16 @@ export function createLeaveRepository(database) {
     },
 
     /**
-     * Inserts a pending leave in one transaction, after the checks D31 adds. The applicant's
+     * Inserts a pending leave in one transaction, after the one check D31 and D40 leave standing: the
+     * request must not overlap the employee's own pending or approved leave. The applicant's
      * employee row is locked FOR NO KEY UPDATE first: that serialises concurrent applies for the
-     * SAME employee -- so two requests cannot both pass the balance check against the same usage --
-     * without blocking other tables' foreign-key checks on that employee, which only take KEY SHARE.
-     * The overlap and usage reads happen under that lock.
+     * SAME employee -- so two requests for the same dates cannot both read "no overlap" and both go
+     * in -- without blocking other tables' foreign-key checks on that employee, which only take KEY
+     * SHARE. The overlap read happens under that lock. (There is no balance check any more: D40.)
      *
-     * `validate({ joinedOn, overlapping, usage })` is supplied by the service and may throw an
-     * HttpError to refuse the request; the business rules stay there and this method does all the
-     * SQL. `joinedOn` is `YYYY-MM-DD` text; `overlapping` is the employee's own pending/approved
-     * leaves that intersect the requested dates; `usage` is the view's rows for the years the
-     * request spans.
+     * `validate({ overlapping })` is supplied by the service and may throw an HttpError to refuse
+     * the request; the business rule stays there and this method does all the SQL. `overlapping` is
+     * the employee's own pending/approved leaves that intersect the requested dates.
      *
      * status, days and every decision column are never written: the column defaults give a pending
      * leave, `days` is generated, and nothing here can decide one.
@@ -139,7 +141,7 @@ export function createLeaveRepository(database) {
         await client.query("BEGIN");
 
         const { rows: [employee] } = await client.query(
-          `SELECT to_char(joined_on, 'YYYY-MM-DD') AS joined_on
+          `SELECT id
            FROM employees
            WHERE id = $1 AND deleted_at IS NULL
            FOR NO KEY UPDATE`,
@@ -160,9 +162,7 @@ export function createLeaveRepository(database) {
           [employee_id, start_date, end_date],
         );
 
-        const { rows: usage } = await client.query(USAGE_SQL, [employee_id, yearsSpannedBy(start_date, end_date)]);
-
-        await validate({ joinedOn: employee.joined_on, overlapping, usage });
+        await validate({ overlapping });
 
         const { rows: [inserted] } = await client.query(
           `INSERT INTO leaves (employee_id, type, start_date, end_date, reason, applied_on)
@@ -269,21 +269,19 @@ export function createLeaveRepository(database) {
     },
 
     /**
-     * What a balance needs: the employee's `joined_on` as `YYYY-MM-DD` text (never read through
-     * employeeRepository, where it would arrive as a local-midnight Date) and the usage view's rows
-     * for the given calendar years. Returns null if the employee does not exist.
+     * Days taken (D40): one `{ type, days_used }` row per leave type the employee has approved leave in
+     * for the given calendar year, or an empty array if none. A leave counts toward the year it
+     * STARTS in. Returns null if the employee does not exist, so the caller can answer 404.
      */
-    async balanceInputs(employeeId, years) {
+    async daysTaken(employeeId, year) {
       const { rows: [employee] } = await database.query(
-        `SELECT to_char(joined_on, 'YYYY-MM-DD') AS joined_on
-         FROM employees
-         WHERE id = $1 AND deleted_at IS NULL`,
+        "SELECT id FROM employees WHERE id = $1 AND deleted_at IS NULL",
         [employeeId],
       );
       if (!employee) return null;
 
-      const { rows: usage } = await database.query(USAGE_SQL, [employeeId, years]);
-      return { joinedOn: employee.joined_on, usage };
+      const { rows } = await database.query(DAYS_TAKEN_SQL, [employeeId, year]);
+      return rows;
     },
   });
 }

@@ -2,7 +2,7 @@ import { HttpError } from "../utils/httpError.js";
 import { leaveBalanceQuerySchema } from "../validation/leaveSchemas.js";
 
 /**
- * Thin HTTP layer for the balance read: validates the query string, then hands off to
+ * Thin HTTP layer for the days-taken read (D40): validates the query string, then hands off to
  * leaveBalanceService, which owns who may read whose balance.
  *
  * @param {() => object} getLeaveBalanceService - called per-request, not at construction time.

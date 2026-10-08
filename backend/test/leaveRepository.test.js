@@ -7,7 +7,7 @@ import { HttpError } from "../src/utils/httpError.js";
 // collapsed so multi-line SQL can be matched on one line (same shape as projectRepository.test.js).
 // Read-side scope coverage lives in resourceRepositories.test.js -- this file is the write path, plus
 // the SQL shape its guarantees depend on. The real lock, the real constraint names, pg's actual date
-// handling and the usage view are proved against a database by scripts/e2e-leaves.js.
+// handling and the days-taken view are proved against a database by scripts/e2e-leaves.js.
 
 function fakeDatabase(handlers) {
   const calls = [];
@@ -36,7 +36,7 @@ const indexOf = (database, matcher) => database.calls.findIndex((call) => matche
 const callStarting = (database, prefix) => database.calls.find((call) => call.text.startsWith(prefix));
 const pgError = (code, constraint) => Object.assign(new Error(`pg ${code}`), { code, constraint });
 
-const LOCK_EMPLOYEE = [/FROM employees WHERE id = \$1 AND deleted_at IS NULL FOR NO KEY UPDATE/, { rows: [{ joined_on: "2020-01-01" }] }];
+const LOCK_EMPLOYEE = [/FROM employees WHERE id = \$1 AND deleted_at IS NULL FOR NO KEY UPDATE/, { rows: [{ id: EMPLOYEE }] }];
 const INSERT = [/^INSERT INTO leaves/, { rows: [{ id: LEAVE }] }];
 const SELECT_LEAVE = (rows = [{ id: LEAVE, status: "pending" }]) => [/FROM leaves WHERE leaves\.id = \$1 AND leaves\.deleted_at IS NULL/, { rows }];
 
@@ -125,16 +125,15 @@ test("findByIdForWrite: a missing or deleted leave is null", async () => {
 // create: the per-employee lock, the order of the checks, the insert
 // ---------------------------------------------------------------------------
 
-test("create: BEGIN, then the employee row is locked FOR NO KEY UPDATE, then the overlap read, then the usage read, then validate, then INSERT, then COMMIT", async () => {
+test("create: BEGIN, then the employee row is locked FOR NO KEY UPDATE, then the overlap read, then validate, then INSERT, then COMMIT", async () => {
   const order = [];
   const database = fakeDatabase([LOCK_EMPLOYEE, INSERT, SELECT_LEAVE()]);
   const repository = createLeaveRepository(database);
 
   await repository.create(CREATE_INPUT, async () => {
     order.push("validate");
-    // validate ran after the three reads and before the insert
+    // validate ran after the lock and the overlap read, and before the insert
     assert.ok(indexOf(database, /FOR NO KEY UPDATE/) < indexOf(database, /FROM leaves WHERE employee_id/));
-    assert.ok(indexOf(database, /FROM leaves WHERE employee_id/) < indexOf(database, /FROM employee_leave_usage/));
     assert.equal(indexOf(database, /^INSERT INTO leaves/), -1, "no insert before validate returns");
   });
 
@@ -156,13 +155,13 @@ test("create: the lock is FOR NO KEY UPDATE, never FOR UPDATE -- other tables' f
   assert.deepEqual(lock.values, [EMPLOYEE]);
 });
 
-test("create: joined_on is read as YYYY-MM-DD text, from a live employee only", async () => {
+test("create: the lock is taken on a LIVE employee, and reads nothing about them beyond the id (no joining date: D40)", async () => {
   const database = fakeDatabase([LOCK_EMPLOYEE, INSERT, SELECT_LEAVE()]);
   await createLeaveRepository(database).create(CREATE_INPUT, async () => {});
 
   const lock = database.calls.find((call) => /FROM employees/.test(call.text));
-  assert.match(lock.text, /to_char\(joined_on, 'YYYY-MM-DD'\) AS joined_on/);
-  assert.match(lock.text, /deleted_at IS NULL/);
+  assert.equal(lock.text, "SELECT id FROM employees WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE");
+  assert.doesNotMatch(lock.text, /joined_on/);
 });
 
 test("create: an unknown or deleted employee is 400 invalid_employee, rolled back, and nothing else is read", async () => {
@@ -200,25 +199,24 @@ test("create: back-to-back leaves do not overlap -- the intersection is inclusiv
   assert.doesNotMatch(overlap.text, /start_date < |end_date > /);
 });
 
-test("create: the usage read is the view, for this employee, for exactly the calendar years the request spans", async () => {
+test("create: D40 -- it reads NO usage and checks NO balance: the only reads are the lock and the overlap", async () => {
   const database = fakeDatabase([LOCK_EMPLOYEE, INSERT, SELECT_LEAVE()]);
   const repository = createLeaveRepository(database);
 
   await repository.create(CREATE_INPUT, async () => {});
+  // a request spanning a year boundary and a very long one, which the pool model used to read usage for
   await repository.create({ ...CREATE_INPUT, start_date: "2026-12-30", end_date: "2027-01-02" }, async () => {});
+  await repository.create({ ...CREATE_INPUT, start_date: "2026-01-01", end_date: "2027-06-30" }, async () => {});
 
-  const reads = database.calls.filter((call) => /FROM employee_leave_usage/.test(call.text));
-  assert.deepEqual(reads[0].values, [EMPLOYEE, [2026]]);
-  assert.deepEqual(reads[1].values, [EMPLOYEE, [2026, 2027]]);
-  assert.match(reads[0].text, /usage_year = ANY\(\$2::int\[\]\)/);
+  assert.equal(database.calls.some((call) => /employee_leave_usage/.test(call.text)), false);
+  const reads = database.calls.filter((call) => /^SELECT/.test(call.text) && !/FROM leaves WHERE leaves\.id/.test(call.text));
+  assert.equal(reads.length, 6, "per create: the lock and the overlap read, and nothing else");
 });
 
-test("create: validate receives joinedOn, the overlapping leaves and the usage rows the reads returned", async () => {
-  const usage = [{ type: "Annual", usage_year: 2026, usage_month: 3, days_approved: 1, days_pending: 0 }];
+test("create: validate receives the overlapping leaves the read returned -- and nothing else", async () => {
   const database = fakeDatabase([
     LOCK_EMPLOYEE,
     [/FROM leaves WHERE employee_id/, { rows: [{ id: "other-leave" }] }],
-    [/FROM employee_leave_usage/, { rows: usage }],
     INSERT,
     SELECT_LEAVE(),
   ]);
@@ -226,12 +224,12 @@ test("create: validate receives joinedOn, the overlapping leaves and the usage r
 
   await createLeaveRepository(database).create(CREATE_INPUT, async (context) => { received = context; });
 
-  assert.deepEqual(received, { joinedOn: "2020-01-01", overlapping: [{ id: "other-leave" }], usage });
+  assert.deepEqual(received, { overlapping: [{ id: "other-leave" }] });
 });
 
 test("create: a refusal thrown by validate rolls back, inserts nothing, releases the client and surfaces unchanged", async () => {
   const database = fakeDatabase([LOCK_EMPLOYEE, INSERT, SELECT_LEAVE()]);
-  const refusal = new HttpError(409, "leave_balance_exceeded", "over", { pool: "monthly" });
+  const refusal = new HttpError(409, "leave_overlaps", "overlap", { existing_id: "other-leave" });
 
   const error = await rejection(createLeaveRepository(database).create(CREATE_INPUT, async () => { throw refusal; }));
 
@@ -416,27 +414,51 @@ test("deleteById: admin/hr mode never re-selects to decide between 404 and 409 -
 });
 
 // ---------------------------------------------------------------------------
-// balanceInputs
+// daysTaken (D40)
 // ---------------------------------------------------------------------------
 
-test("balanceInputs: joined_on as text plus the view's rows for the given years", async () => {
-  const usage = [{ type: "Annual", usage_year: 2026, usage_month: 3, days_approved: 2, days_pending: 0 }];
+test("daysTaken: one row per type from the restored view, for this employee and this calendar year", async () => {
+  const taken = [{ type: "Annual", days_used: 5 }, { type: "Sick", days_used: 2 }];
   const database = fakeDatabase([
-    [/FROM employees WHERE id = \$1 AND deleted_at IS NULL/, { rows: [{ joined_on: "2024-05-06" }] }],
-    [/FROM employee_leave_usage/, { rows: usage }],
+    [/FROM employees WHERE id = \$1 AND deleted_at IS NULL/, { rows: [{ id: EMPLOYEE }] }],
+    [/FROM employee_leave_usage/, { rows: taken }],
   ]);
 
-  const result = await createLeaveRepository(database).balanceInputs(EMPLOYEE, [2026]);
+  const result = await createLeaveRepository(database).daysTaken(EMPLOYEE, 2026);
 
-  assert.deepEqual(result, { joinedOn: "2024-05-06", usage });
-  assert.match(database.calls[0].text, /to_char\(joined_on, 'YYYY-MM-DD'\) AS joined_on/);
-  assert.deepEqual(database.calls[1].values, [EMPLOYEE, [2026]]);
+  assert.deepEqual(result, taken);
+  assert.deepEqual(database.calls[1].values, [EMPLOYEE, 2026]);
+  assert.match(database.calls[1].text, /WHERE employee_id = \$1 AND leave_year = \$2::int/);
 });
 
-test("balanceInputs: an unknown or deleted employee is null and the usage view is never queried", async () => {
+test("daysTaken: reads the 001-shaped columns (leave_year, days_used) -- not the per-month ones migration 010 had", async () => {
+  const database = fakeDatabase([[/FROM employees/, { rows: [{ id: EMPLOYEE }] }]]);
+  await createLeaveRepository(database).daysTaken(EMPLOYEE, 2026);
+
+  const { text } = database.calls[1];
+  assert.match(text, /days_used/);
+  assert.match(text, /leave_year/);
+  assert.doesNotMatch(text, /usage_year|usage_month|days_approved|days_pending/);
+});
+
+test("daysTaken: days_used is cast to int in SQL, because sum(integer) is bigint and pg returns bigint as a string", async () => {
+  const database = fakeDatabase([[/FROM employees/, { rows: [{ id: EMPLOYEE }] }]]);
+  await createLeaveRepository(database).daysTaken(EMPLOYEE, 2026);
+
+  assert.match(database.calls[1].text, /days_used::int AS days_used/);
+  assert.match(database.calls[1].text, /type::text AS type/);
+});
+
+test("daysTaken: an employee with no approved leave that year is an empty list, not null", async () => {
+  const database = fakeDatabase([[/FROM employees/, { rows: [{ id: EMPLOYEE }] }]]);
+
+  assert.deepEqual(await createLeaveRepository(database).daysTaken(EMPLOYEE, 2026), []);
+});
+
+test("daysTaken: an unknown or deleted employee is null and the usage view is never queried", async () => {
   const database = fakeDatabase([]);
 
-  assert.equal(await createLeaveRepository(database).balanceInputs(EMPLOYEE, [2026]), null);
+  assert.equal(await createLeaveRepository(database).daysTaken(EMPLOYEE, 2026), null);
   assert.equal(database.calls.length, 1);
 });
 
@@ -444,12 +466,13 @@ test("balanceInputs: an unknown or deleted employee is null and the usage view i
 // The concurrent-apply lock, modelled
 // ---------------------------------------------------------------------------
 
-test("create under a per-employee lock: two concurrent applies against a one-day balance admit exactly one", async () => {
+test("create under a per-employee lock: concurrent applies for the SAME dates admit exactly one", async () => {
   // A unit test cannot prove Postgres serialises on FOR NO KEY UPDATE -- scripts/e2e-leaves.js does,
   // with real concurrent transactions. What it CAN prove is that the repository's ORDER is correct
-  // for the lock to work: the lock is taken before the usage read, and the usage read is taken
+  // for the lock to work: the lock is taken before the overlap read, and the overlap read is taken
   // before validate. This models the lock as a mutex held from the lock query until COMMIT/ROLLBACK
-  // and shows that, given that order, the second apply sees the first's insert and is refused.
+  // and shows that, given that order, the second apply sees the first's insert and is refused as an
+  // overlap. (The lock was added for a balance check; since D40 the overlap check is what needs it.)
   const committed = [];                      // rows visible to later readers
   let held = Promise.resolve();
   let release;
@@ -466,10 +489,11 @@ test("create under a per-employee lock: two concurrent applies against a one-day
               held = new Promise((resolve) => { release = resolve; });
               mine = release;
               await previous;                // blocks until the earlier holder commits or rolls back
-              return { rows: [{ joined_on: "2020-01-01" }] };
+              return { rows: [{ id: EMPLOYEE }] };
             }
-            if (/FROM employee_leave_usage/.test(sql)) {
-              return { rows: committed.length ? [{ type: "Annual", usage_year: 2026, usage_month: 3, days_approved: 0, days_pending: committed.length }] : [] };
+            if (/FROM leaves WHERE employee_id/.test(sql)) {
+              // the overlap read: sees whatever an earlier holder has COMMITTED by now
+              return { rows: committed.length ? [{ id: "leave-1" }] : [] };
             }
             if (/^INSERT INTO leaves/.test(sql)) {
               await new Promise((resolve) => setImmediate(resolve));   // give the other request every chance to interleave
@@ -489,9 +513,8 @@ test("create under a per-employee lock: two concurrent applies against a one-day
 
   const repository = createLeaveRepository(lockingDatabase());
   const oneDay = { ...CREATE_INPUT, start_date: "2026-03-10", end_date: "2026-03-10" };
-  const validate = async ({ usage }) => {
-    const used = usage.reduce((sum, row) => sum + row.days_pending + row.days_approved, 0);
-    if (used + 1 > 1) throw new HttpError(409, "leave_balance_exceeded", "over");
+  const validate = async ({ overlapping }) => {
+    if (overlapping.length > 0) throw new HttpError(409, "leave_overlaps", "overlap");
   };
 
   const results = await Promise.allSettled([
@@ -499,6 +522,6 @@ test("create under a per-employee lock: two concurrent applies against a one-day
   ]);
 
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1, "exactly one apply wins");
-  assert.equal(results.filter((result) => result.status === "rejected" && result.reason.code === "leave_balance_exceeded").length, 2);
+  assert.equal(results.filter((result) => result.status === "rejected" && result.reason.code === "leave_overlaps").length, 2);
   assert.equal(committed.length, 1);
 });
