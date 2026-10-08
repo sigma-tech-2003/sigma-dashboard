@@ -530,23 +530,42 @@ listed below):
   identifies them by id and only admin and hr can read the department list
   ([D33](schema-design.md#d33--department-names-for-manager-tl-and-employee)).
 
-**Open decisions this phase cannot start without** (all recorded in
-[schema-design.md §9](schema-design.md#9-decisions-i-need-from-you), none settled):
+**Decisions this phase depended on** (all recorded in
+[schema-design.md §9](schema-design.md#9-decisions-i-need-from-you)). **D32–D39 were settled on
+2026-10-09; D20 is the one still open.**
 
-| Decision | Gates |
-|---|---|
-| [D20](schema-design.md#d20--agentsmd-1-still-forbids-the-polling-decision) `AGENTS.md` §1 vs polling | the polling work (item 4) |
-| [D32](schema-design.md#d32--session-restore-and-the-frontends-own-profile) no session / profile endpoint | login and every page |
-| [D33](schema-design.md#d33--department-names-for-manager-tl-and-employee) department names for manager, tl, employee | login, and every `.dept` use |
-| [D34](schema-design.md#d34--delivering-the-password-setup-link-builds-on-d25) password-setup delivery | employee creation |
-| [D35](schema-design.md#d35--employee-status-on-create) employee status on create | employee creation |
-| [D36](schema-design.md#d36--production-cookie-topology) production cookie topology | login in production |
-| [D37](schema-design.md#d37--the-role-selector-role_mismatch) the role selector | login |
-| [D38](schema-design.md#d38--payroll-tax-client-preview-vs-the-database) payroll tax parity | the payroll page |
-| [D39](schema-design.md#d39--response-shape-and-leave-balance-presentation) response shape and leave-balance presentation | every page |
+| Decision | Gates | Outcome |
+|---|---|---|
+| [D20](schema-design.md#d20--agentsmd-1-still-forbids-the-polling-decision) `AGENTS.md` §1 vs polling | the polling work (item 4) | **open** |
+| [D32](schema-design.md#d32--session-restore-and-the-frontends-own-profile) session / profile | login and every page | `GET /auth/me`, after `POST /auth/refresh` |
+| [D33](schema-design.md#d33--department-names-for-manager-tl-and-employee) department names | login, and every `.dept` use | the server returns `department_name` with the id; no permission change |
+| [D34](schema-design.md#d34--delivering-the-password-setup-link-builds-on-d25) password-setup delivery | employee creation | D25's interim stands: admin or hr relays a link; a set-password route is added; email is a later decision |
+| [D35](schema-design.md#d35--employee-status-on-create) employee status on create | employee creation | `POST /employees` accepts `employment_status` of `active` or `inactive` |
+| [D36](schema-design.md#d36--production-cookie-topology) production cookie topology | login in production | same-origin through a Vercel rewrite; cookie unchanged |
+| [D37](schema-design.md#d37--the-role-selector-role_mismatch) the role selector | login | a client-side check at login only |
+| [D38](schema-design.md#d38--payroll-tax-client-preview-vs-the-database) payroll tax | the payroll page | keep the preview, fix the inputs, add a parity test |
+| [D39](schema-design.md#d39--response-shape-and-leave-balance-presentation) response shape | every page | frontend mappers, pure functions tested with `node --test` |
 
-**Depends on.** Phase 9 (done), D20 closed, and at least D32, D33, D34, D36 and D37 decided,
-since together they gate login.
+**Work these decisions require — recorded, not built.** *(Added 2026-10-09 from the eight decisions, so it
+is in one place.)*
+- **Backend, to land before the frontend work** — four small additions, each with tests and an end-to-end
+  check: `GET /auth/me` (D32); `department_name` on employee reads, project reads and `/auth/me` (D33); an
+  optional `employment_status` on `POST /employees` (D35); and the employee `basic` and `allowances` returned
+  as numbers (D38). **D34, D36, D37 and D39 need no backend change.**
+- **Frontend:**
+  - Production reaches the API through a `vercel.json` rewrite, with a relative base URL (`/api/v1`) and a
+    Vite dev proxy to match (D36).
+  - A set-password route, the link-issuing UI for admin and hr, and a notice for managers and tls that an
+    admin or hr must send the link (D34).
+  - The role check at login only, with session restore on page load not re-checking (D37).
+  - The mappers as pure functions, a `test` script in `package.json`, and `calcTax` extracted into its own
+    pure module with the parity test (D39, D38).
+  - Usage cards in place of balance cards (D40).
+  - The page-level fixes mappers cannot make: id arithmetic (`PayrollPage.jsx:24` and `:46`) and
+    client-generated `Date.now()` ids (D39).
+
+**Depends on.** Phase 9 (done), D32–D39 (settled), the four backend additions above, and D20 closed — the
+one decision still open, which gates the polling work.
 
 **Verified by.** A staged rehearsal on a copy: each of the five roles logs in through the UI,
 sees the scope the API returns, and performs the role × operation matrix; a decision made by
@@ -640,7 +659,7 @@ Phase 0  schema ──► 1 auth/scope ──► 2 ETL ──► 3 read API + pa
                                                      9 leaves  ◄── was blocked by D4 (dissolved by D40; rework needed)
                                                                 │
                                                                 ▼
-                                                     10 frontend cutover  ◄── blocked by D20, D32-D39
+                                                     10 frontend cutover  ◄── blocked by D20 (D32-D39 settled)
                                                                 │
                                                                 ▼
                                                      11 decommission
@@ -692,9 +711,9 @@ and rehearse it fully on a copy first.
 | ~~[D3](schema-design.md#d3--realtime-behavior-is-lost--settled-polling) realtime loss~~ | Phase 3-4 | **settled** — polling; but see D20 below |
 | ~~[D11](schema-design.md#d11--firebase-auth-passwords-cannot-be-exported) password migration~~ | Phase 4 | **settled (2026-09-21)** — moot, no data migration, no existing users |
 | ~~[D4](schema-design.md#d4--where-do-leave-entitlements-come-from) leave entitlements~~ | Phase 9 | **dissolved (2026-10-08, [D40](schema-design.md#d40--no-leave-entitlements-approval-is-the-only-control--settled))** — there are no entitlements; a balance is now days taken |
-| [D40](schema-design.md#d40--no-leave-entitlements-approval-is-the-only-control--settled) what "days taken" counts, and the usage view | the Phase 9 rework, then Phase 10's usage cards | open; Phase 9 as built is partly wrong (see Phase 9) and the endpoint's final meaning is undecided |
+| [D40](schema-design.md#d40--no-leave-entitlements-approval-is-the-only-control--settled) what "days taken" counts, and the usage view | the Phase 9 rework, then Phase 10's usage cards | **rework done 2026-10-08** (see Phase 9); still open: the Maternity cap, and whether pending requests should be shown separately from approved ones |
 | [D20](schema-design.md#d20--agentsmd-1-still-forbids-the-polling-decision) `AGENTS.md` §1 conflict | Phase 3 (still open; now also gates Phase 10's polling work) | the rule still forbids what D3 decided |
-| [D32](schema-design.md#d32--session-restore-and-the-frontends-own-profile)–[D39](schema-design.md#d39--response-shape-and-leave-balance-presentation) frontend cutover gaps | Phase 10 | all open; each is a gap between what the API provides and what the frontend needs — Phase 10 lists which gates what |
+| [D32](schema-design.md#d32--session-restore-and-the-frontends-own-profile)–[D39](schema-design.md#d39--response-shape-and-leave-balance-presentation) frontend cutover gaps | Phase 10 | **all settled 2026-10-09**; Phase 10 lists the outcomes and the backend and frontend work they require |
 
 **D3 is settled as polling, but D20 is not.** The app is live-updating today via `onSnapshot`;
 under polling it will not be. `AGENTS.md` §1 requires UI behavior to stay unchanged during the
