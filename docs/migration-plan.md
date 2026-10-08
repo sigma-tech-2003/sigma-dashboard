@@ -392,6 +392,42 @@ not that the migration is wrong.
 frontend is a different matter — it still calls Firebase for everything until
 [Phase 10](#phase-10--frontend-cutover) (see the correction under Principle 3).
 
+> **Superseded in part, 2026-10-08 — [D40](schema-design.md#d40--no-leave-entitlements-approval-is-the-only-control--settled).**
+> Management has decided there are **no leave entitlements and no limits**; approval is the only
+> control. This phase's description above was written for the pool model and is partly wrong now:
+> - **The D4 "hard blocker" has dissolved.** There is nothing to compute `entitlement − usage` from,
+>   because there is no entitlement. D5 (year-boundary attribution) is superseded too.
+> - "Balances computed from the `employee_leave_usage` view" becomes **days taken**: the endpoint
+>   reports usage, not what remains.
+> - The "Verified by" reconciliation against Firestore's stored `leaveBalances` is moot: those counters
+>   held entitlement and remaining figures, which no longer exist.
+>
+> **Rework required — Phase 9 as built is partly wrong, and the cost is real.** It was built, tested
+> and verified against the pool model, and a large part of it must be removed or rewritten. The detail
+> and the counts are in D40; in short:
+> - `leaveEntitlements.js` (208 lines, imported by seven files) goes, along with the over-balance check,
+>   and the balance service is rewritten from "remaining" to "taken".
+> - The per-month usage view (the second half of migration `010`) was built for the pool model.
+>   Changing or dropping it takes a **new migration**, which is not written.
+> - About **89 of the 205 leave tests (43%)** must be removed or rewritten (about 73 removed outright,
+>   about 16 rewritten), and about 60 of the end-to-end script's 150 check sites, including two of its
+>   race proofs, which must be redesigned around overlap.
+> - What survives: the authorization service, decide, cancel and delete, the overlap refusal and its
+>   lock, the self-approval ban, the soft delete and its deleter column, and who may read a balance.
+>
+> Nothing is deployed and Phase 9 is not connected to the frontend, so no user is affected.
+>
+> **Proposed sequencing — not decided:** do this rework **before Phase 10**, because Phase 10 builds the
+> frontend's usage cards against the balance endpoint's new meaning and would otherwise build them
+> twice. The open questions in D40 about what "days taken" counts need answering first.
+>
+> **Rework done, 2026-10-08.** The entitlement module, the
+> over-balance check and the pool code are removed; migration `011` restores the usage view; the balance
+> endpoint reports days taken; the tests and the end-to-end script were rewritten (suite 983 → 934, leave
+> tests 205 → 156, end-to-end 139 results passing against `sigma_hrm_scratch`). Several of D40's open
+> questions were answered by restoring the pre-`010` view and are listed there for confirmation. This
+> removes the Phase 9 rework from the path to Phase 10.
+
 ---
 
 ## Phase 10 — Frontend cutover
@@ -457,7 +493,11 @@ listed below):
    `position_title`, `department_id`, `employee_number`, `joined_on`, ...); the pages consume
    Firestore-shaped documents (`name`, `pos`, `dept`, `empId`, `joinDate`, ...), and the leave
    balance is a different shape altogether. The approach is an open decision
-   ([D39](schema-design.md#d39--response-shape-and-leave-balance-presentation)).
+   ([D39](schema-design.md#d39--response-shape-and-leave-balance-presentation)). Since 2026-10-08
+   the leave balance cards also become **usage cards** (days taken, with no total or remaining
+   figure), because there are no entitlements
+   ([D40](schema-design.md#d40--no-leave-entitlements-approval-is-the-only-control--settled)); what
+   they show is an open question there.
 
 **Known hazards found so far — a partial list.**
 
@@ -551,6 +591,39 @@ deleted, until at least one full payroll cycle has run on Postgres.
 
 ---
 
+## Phase 12 — Announcements (deferred, not cancelled)
+
+*Added 2026-10-08.*
+
+**Build.** An announcements feature: an admin posts something that all employees see. **Nothing is
+designed.** It would need somewhere to store announcements, endpoints to post and read them, and a
+place for them in the frontend, along with the questions that come with any of those — none of which
+has been asked yet.
+
+**Why it is here and not earlier.** It is deferred until the Firebase migration is complete, so that it
+is built once, on Postgres, with no Firebase version to migrate. **Deferred, not cancelled.**
+
+**Depends on.** Phase 11. Independent of Phase 13.
+
+---
+
+## Phase 13 — UI and animation work (deferred, not cancelled)
+
+*Added 2026-10-08.*
+
+**Build.** The broader UI and animation work, beyond keeping the existing interface unchanged through
+the migration. `AGENTS.md` §4 and §5 already set the design standard and the GSAP rules this would
+follow. **Nothing is scoped here.**
+
+**Why it is here and not earlier.** `AGENTS.md` §1 requires the existing frontend architecture and UI
+behaviour to stay unchanged during any backend or database migration. The departures recorded so far are
+the polling decision (D3, with the conflict still open as D20) and the usage cards (D40); this work is
+deferred until the migration is complete so it does not compound them. **Deferred, not cancelled.**
+
+**Depends on.** Phase 11. Independent of Phase 12.
+
+---
+
 ## Dependency order at a glance
 
 ```
@@ -564,13 +637,16 @@ Phase 0  schema ──► 1 auth/scope ──► 2 ETL ──► 3 read API + pa
                  5 depts ──► 6 attendance ──► 7 payroll ──► 8 projects+kpis
                                                                 │
                                                                 ▼
-                                                     9 leaves  ◄── blocked by D4
+                                                     9 leaves  ◄── was blocked by D4 (dissolved by D40; rework needed)
                                                                 │
                                                                 ▼
                                                      10 frontend cutover  ◄── blocked by D20, D32-D39
                                                                 │
                                                                 ▼
                                                      11 decommission
+                                                                │
+                                                                ▼
+                                                     12 announcements, 13 UI and animation  (deferred)
 ```
 
 Phases 5-8 are drawn sequentially because each is a separate cutover window, but they are
@@ -578,7 +654,9 @@ independent of one another and could be reordered or parallelised. Phase 9 is la
 necessity; Phase 4 must precede all of them because scope resolution depends on it.
 
 Phases 0-9 are the **backend**; Phase 10 is the whole **frontend** cutover and is a single
-window (see its note on why it cannot be per-domain); Phase 11 removes Firebase.
+window (see its note on why it cannot be per-domain); Phase 11 removes Firebase. Phases 12 and 13
+are **deferred, not cancelled**: they come after the Firebase migration is complete, and are
+independent of each other.
 
 ---
 
@@ -613,7 +691,8 @@ and rehearse it fully on a copy first.
 | ~~[D1](schema-design.md#d1--soft-or-hard-delete) soft vs hard delete~~ | Phase 0 | **settled** — soft for employees/payroll/leaves, hard elsewhere |
 | ~~[D3](schema-design.md#d3--realtime-behavior-is-lost--settled-polling) realtime loss~~ | Phase 3-4 | **settled** — polling; but see D20 below |
 | ~~[D11](schema-design.md#d11--firebase-auth-passwords-cannot-be-exported) password migration~~ | Phase 4 | **settled (2026-09-21)** — moot, no data migration, no existing users |
-| [D4](schema-design.md#d4--where-do-leave-entitlements-come-from) leave entitlements | Phase 9 | balances are uncomputable without it |
+| ~~[D4](schema-design.md#d4--where-do-leave-entitlements-come-from) leave entitlements~~ | Phase 9 | **dissolved (2026-10-08, [D40](schema-design.md#d40--no-leave-entitlements-approval-is-the-only-control--settled))** — there are no entitlements; a balance is now days taken |
+| [D40](schema-design.md#d40--no-leave-entitlements-approval-is-the-only-control--settled) what "days taken" counts, and the usage view | the Phase 9 rework, then Phase 10's usage cards | open; Phase 9 as built is partly wrong (see Phase 9) and the endpoint's final meaning is undecided |
 | [D20](schema-design.md#d20--agentsmd-1-still-forbids-the-polling-decision) `AGENTS.md` §1 conflict | Phase 3 (still open; now also gates Phase 10's polling work) | the rule still forbids what D3 decided |
 | [D32](schema-design.md#d32--session-restore-and-the-frontends-own-profile)–[D39](schema-design.md#d39--response-shape-and-leave-balance-presentation) frontend cutover gaps | Phase 10 | all open; each is a gap between what the API provides and what the frontend needs — Phase 10 lists which gates what |
 

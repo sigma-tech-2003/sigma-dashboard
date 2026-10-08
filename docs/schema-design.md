@@ -491,6 +491,10 @@ day count in Postgres, so the expression is exact and immutable.
 > at the end of [D31](#d31--leave-write-rules-and-entitlement--settled) for what that involves and
 > what is still undecided.
 
+> **Superseded again, 2026-10-08 ([D40](#d40--no-leave-entitlements-approval-is-the-only-control--settled)).**
+> With no limits there is no counting rule to change, so the replacement of this column is **cancelled**.
+> The migration was never written, and the calendar-day definition above **stands**.
+
 `decided_by_employee_id` / `decided_at` are **new**. Firestore's `canUpdateLeave`
 (`:428-438`) permits changing only `status`, so there is no record of who approved a leave.
 Adding it is required to enforce the self-approval ban in the database at all, and is an
@@ -732,6 +736,13 @@ and that module, and served at `GET /api/v1/leave-balances`; see
 > `Maternity` in calendar days. (A fourth, Eid, pool needs no change to this view: type decides every
 > pool, so Eid leave would need a leave type of its own — see D31's second amendment.) The migration is not written; see the amendment at
 > the end of [D31](#d31--leave-write-rules-and-entitlement--settled).
+
+> **Superseded again, 2026-10-08 ([D40](#d40--no-leave-entitlements-approval-is-the-only-control--settled)).**
+> The per-month, per-day split was built for the pool model, which no longer exists, so it is no longer
+> needed. **This view is now an open question**: reuse it as the basis of a "days taken" figure, change
+> it, or drop it. Any of those is a **new migration** (`001`–`010` are never edited), and none is
+> written. Until then the view exists in the schema, and migration `010`'s tests still describe it
+> accurately, because `010` itself does not change.
 
 Note this also resolves ambiguity A2 by decision: balances were stale because nothing
 decremented them. Deriving from `leaves` makes staleness structurally impossible.
@@ -1027,6 +1038,11 @@ the existing links to it from `migration-plan.md` still resolve.)
 > rules above stand as recorded; see the amendment at the end of
 > [D31](#d31--leave-write-rules-and-entitlement--settled).
 
+> **SUPERSEDED 2026-10-08 by [D40](#d40--no-leave-entitlements-approval-is-the-only-control--settled):
+> the answer to D4 is now that there are no leave entitlements.** The three rules above, and the fourth
+> pool noted in the amendment, were management's position on 2026-10-07. They are kept as recorded,
+> because the reasoning is worth having if limits are ever reintroduced, but none of them is in force.
+
 ### D5 — Does an approved leave in a prior year still count?
 `employee_leave_usage` groups by `date_part('year', start_date)`. A leave spanning a year
 boundary is attributed entirely to its start year. Confirm, or specify proration.
@@ -1044,6 +1060,11 @@ keeps its original text so the existing links to it still resolve.)
 > when 30 January is a Friday, 30 January to 2 February is 1 working day of January and 1 of
 > February, not 2 and 2. See the amendment at the end of
 > [D31](#d31--leave-write-rules-and-entitlement--settled).
+
+> **SUPERSEDED 2026-10-08 by [D40](#d40--no-leave-entitlements-approval-is-the-only-control--settled).**
+> With no pools there is no month or year to charge a day to, so the per-day split has no purpose.
+> Whether a "days taken" figure splits a leave across periods or attributes it whole is an open question
+> in D40.
 
 ### D6 — `role` on `users` rather than `employees`
 Firestore keeps role on the employee document. I put it on `users` (§4.2 rationale). Confirm.
@@ -1611,11 +1632,22 @@ assignees, which D29 forbids, and that their KPIs would still need a rule.
 
 ### D31 — Leave write rules and entitlement — ✅ SETTLED
 
+> **SUPERSEDED IN PART, 2026-10-08, by [D40](#d40--no-leave-entitlements-approval-is-the-only-control--settled).**
+> Management has since decided there are **no leave entitlements and no limits**. Everything in this
+> entry about **pools** is superseded: the monthly 2, the December 10, the annual 14, the Eid 4, the
+> type-to-pool map, the working-days rule, the Maternity cap, the over-balance refusal and the Eid date
+> ranges — **including both amendments at the end of this entry.** The superseded text is kept, and
+> labelled where it stands, because the reasoning is worth having if limits are ever reintroduced.
+> **What stands** — the overlap refusal, the self-approval ban, who may apply, decide, cancel and delete,
+> backdating, and who may read a balance — is listed in D40. The word "SETTLED" in the heading describes
+> the entry as originally decided; the heading text is unchanged so existing links still resolve.
+
 Decided before Phase 9 implementation. It answers D4 with management's entitlement rules, and settles
 D5, D8 and D12 along the way. Everything here is a service-layer or API-layer rule unless it says
 otherwise. `days` stays a generated column and is never accepted from a client. *(Amended
 2026-10-07: a client still never supplies `days`, but the generated definition counts calendar days
-and will have to be replaced — see the amendment at the end of this entry.)*
+and will have to be replaced — see the amendment at the end of this entry.)* *(Superseded
+2026-10-08, D40: the replacement is cancelled and the calendar-day definition stands.)*
 
 > **Amended 2026-10-07.** Management has since answered both open items below and added a rule that
 > was not captured: Maternity is **16 weeks**, leave is counted in **working days** (which
@@ -1627,6 +1659,10 @@ and will have to be replaced — see the amendment at the end of this entry.)*
 > the [amendment at the end of this entry](#amendment-2026-10-07--maternity-working-days-and-a-fourth-pool-eid)
 > governs wherever the two disagree. Nothing in the code or the migrations has been changed to match
 > yet: as committed, they still implement the rules as originally recorded here.
+
+> **SUPERSEDED 2026-10-08 (D40): the pool system.** There are no pools. The paragraph and table below
+> record what was decided and are kept for the reasoning only. The five leave types and the enum stand,
+> as labels.
 
 **The three pools and the five leave types.** The UI offers five types (`Annual`, `Sick`, `Casual`,
 `Maternity`, `Emergency`) and the enum keeps all five, so the frontend and the database vocabulary are
@@ -1645,6 +1681,8 @@ having the employee pick a pool would need a field the UI does not have. The all
 map live in that one code module, not in a table; moving them to a table is a later change if
 management wants them editable.
 
+> **SUPERSEDED 2026-10-08 (D40).** No allowance exists, so none of the rules below applies.
+
 **The rules behind the numbers.**
 - The monthly 2 **does not carry forward**: every calendar month starts fresh.
 - The Christmas 10 are **usable only in December** and expire on 31 December, so December's allowance
@@ -1654,6 +1692,12 @@ management wants them editable.
 - **No proration anywhere.** The monthly 2 applies for every month an employee is employed, the full 14
   for every calendar year they are employed, and the full 10 however late in the year they joined.
   Months before the month containing `joined_on` carry no entitlement.
+
+> **SUPERSEDED IN PART, 2026-10-08 (D40).** A balance is no longer entitlement minus usage: the endpoint
+> now reports **days taken**. Still true: it is derived from `leaves` at read time and never stored, and
+> rejected and deleted leave never counts. Superseded: calendar-versus-working-day counting, the per-day
+> split across months, and the planned replacement of the usage view. Whether pending requests count
+> toward "taken" is now an open question in D40 (they used to reserve days against an allowance).
 
 **How a balance is computed.** A balance is derived from `leaves` at read time, never stored.
 - ~~**Days are calendar days, inclusive**, which is what the generated `days` column already holds. A
@@ -1694,9 +1738,11 @@ a `CHECK` should require `deleted_at IS NOT NULL` whenever the deleter is set, a
 should serve the `SET NULL` scan. There is no hard-delete path.
 
 **Checks added at write time.** Firestore had none of these.
-- A request that would exceed the balance is refused with a `409`, counting approved and pending, and
+- ~~A request that would exceed the balance is refused with a `409`, counting approved and pending, and
   serialised per employee against concurrent applies. `Maternity` is exempt (outside the pools),
-  *(amended 2026-10-07: but it now has its own 16-week cap)*.
+  *(amended 2026-10-07: but it now has its own 16-week cap)*.~~ **SUPERSEDED 2026-10-08 (D40): nothing is
+  refused for exceeding a balance, because there is no balance to exceed.** The **per-employee
+  serialisation stays**: it is what makes the overlap check below safe against concurrent applies.
 - A request that overlaps the same employee's own pending or approved leave is refused with a `409`,
   since the two would charge the same days twice.
 - **Backdating is allowed** and no future limit applies, as in Firestore: sick leave is often filed
@@ -1707,12 +1753,17 @@ for (`admin`/`hr` any, `manager` their department, `tl` their team). That is a w
 only the employee read their own balance and denied `admin` and `hr` — but an approver needs the number
 to decide.
 
+> **Stands, 2026-10-08 (D40):** who may read it is unchanged. What it reports changes: days taken, not
+> days remaining.
+
 **Defaults, not among the questions explicitly answered.** `applied_on` is set by the server to today
 in the company timezone. `start_date`, `end_date` and `applied_on` are returned as `YYYY-MM-DD` text,
 the same date fix made for attendance, payroll and projects. The request carries the type, the two
 dates and the reason; nothing else is accepted.
 
 **Open items, as originally recorded — both resolved 2026-10-07; see the amendment below.**
+*(Superseded 2026-10-08, D40: both resolutions are themselves superseded. With no limits, neither a
+Maternity cap nor a counting rule applies.)*
 - ~~**Maternity** is outside the pools and uncapped as an **interim**, because none of management's three
   rules mentions it, in the same spirit as D25. Management needs to supply a figure; until then a
   maternity request is approval-gated and nothing more.~~ **Resolved: 16 weeks.**
@@ -1720,6 +1771,11 @@ dates and the reason; nothing else is accepted.
   **Resolved, and it overturned the recorded decision: leave is counted in working days.**
 
 #### Amendment (2026-10-07) — Maternity, working days and a fourth pool (Eid)
+
+> **SUPERSEDED IN FULL, 2026-10-08, by [D40](#d40--no-leave-entitlements-approval-is-the-only-control--settled).**
+> Kept for the reasoning only. Maternity's cap, working-day counting and the Eid pool are all
+> superseded, and the open questions at the end of this amendment are moot. **Do not implement anything
+> from it.**
 
 As relayed by the project owner on 2026-10-07, reporting management's answers, and recorded as given.
 **No implementation, migration or code change accompanies this amendment.** It changes what the system
@@ -1847,6 +1903,11 @@ amendment below: items it resolves are struck through rather than removed.)* **N
   is a use of the ranges the second amendment leaves open.
 
 #### Second amendment (2026-10-07) — Maternity in calendar days; type decides the pool; Eid needs a type
+
+> **SUPERSEDED IN FULL, 2026-10-08, by [D40](#d40--no-leave-entitlements-approval-is-the-only-control--settled).**
+> Kept for the reasoning only. With no pools there is nothing for the leave type to decide, the Maternity
+> cap is superseded, and the question of whether to add an Eid leave type is moot. **Do not implement
+> anything from it.**
 
 As relayed by the project owner, reporting three further answers from management, and recorded as
 given. Like the first, **it carries no implementation, migration or code change.** It also corrects one
@@ -2181,6 +2242,165 @@ For the balance cards, A needs a deliberate choice about what a per-type card no
 and Casual draw on one shared pool; Sick and Emergency on another; Maternity on none). Any
 mapping is a visible change to what the cards say.
 
+> **Superseded in part, 2026-10-08 ([D40](#d40--no-leave-entitlements-approval-is-the-only-control--settled)).**
+> The pools no longer exist, so the paragraph above about what a per-type card means is moot. The
+> cards become **usage cards**: they show days taken, and there is no total or remaining figure to
+> show. What exactly they show is an open question in D40. The rest of this entry (the field-name
+> translation and the ids) is unaffected.
+
 **Recommendation (not settled): A.** It matches the migration plan's own intent that pages stay
 as they are. How the balance cards should read is a product question for you, not a mapping
 detail.
+
+---
+
+### D40 — No leave entitlements: approval is the only control — ✅ SETTLED
+
+Decided 2026-10-08, from management's answer as relayed by the project owner, **before any change to
+the code**. It supersedes D31's pool system and the parts of D4 and D5 that D31 settled. This entry is
+documentation only: nothing in the code, the migrations or the tests has been changed to match, and as
+committed they still implement the pool model.
+
+**What management decided.** There are **no leave entitlements and no limits.** Anyone may apply for
+any number of days at any time. **Approval is the only control**: a manager, TL, HR or admin looks at
+the request and decides.
+
+**What stands from D31.** None of this depended on entitlements, and none of it changes:
+- **The overlap refusal.** A request that overlaps the same employee's own pending or approved leave is
+  refused with `409 leave_overlaps`, since the two would cover the same days. **The per-employee
+  serialisation stays with it.** That lock was added for the balance check, but it is also what makes the
+  overlap check safe: without it two simultaneous requests for the same dates both read "no overlap" and
+  both go in. The end-to-end script showed exactly that when the lock was removed (five identical
+  concurrent applies were all admitted).
+- **The self-approval ban** (D8): nobody decides their own request. It is the database constraint
+  `leaves_no_self_approval`, surfaced as `403 self_approval_denied`, and is not re-implemented anywhere.
+- **Who may apply** (D12): every role, for themselves only.
+- **Who may decide:** `admin` and `hr` any request, a `manager` their department, a `tl` their team. A
+  decided request is immutable, enforced by a guarded `UPDATE`.
+- **Cancelling and deleting:** an employee may cancel their own pending request; `admin` and `hr` may
+  delete a leave in any status. Delete is soft and records the deleter — the first half of migration
+  `010` (`deleted_by_employee_id`, its `CHECK` and its index).
+- **Backdating is allowed**, with no future limit.
+- **Who may read a balance:** the employee, plus approvers within the scope they can already read leaves
+  for. Only what the balance means changes (below).
+- `applied_on` is set by the server; dates are returned as `YYYY-MM-DD` text; a request carries the type,
+  the two dates and the reason, and nothing else.
+- **The five leave types and the enum stay**, as labels an approver and a usage figure can use. The type
+  no longer decides anything.
+- **`leaves.days` stays the calendar-day generated column from migration `001`.** The replacement that
+  D31's amendment said it needed was never written, and is now cancelled.
+
+**What is superseded** — kept in place, labelled, and dated 2026-10-08, because the reasoning is worth
+having if limits are ever reintroduced:
+
+| Superseded | Recorded in | Was | Now |
+|---|---|---|---|
+| Monthly pool | D4, D31 | 2 per calendar month, no carry-forward | none |
+| December bonus | D4, D31 | 10 more in December, so 12 | none |
+| Serious-need pool | D4, D31 | 14 per calendar year for `Sick` and `Emergency` | none |
+| Eid pool | D31, first amendment | 2 per Eid, 4 a year | none |
+| Type-to-pool map | D31 | `Annual`/`Casual` → monthly, `Sick`/`Emergency` → serious need, `Maternity` → none | none; the type is a label |
+| Over-balance refusal | D31, "Checks added at write time" | `409 leave_balance_exceeded` | removed; nothing is refused for length or number of days |
+| Working-days rule | D31, first amendment | Saturday and Sunday do not count | none; there is nothing to count against |
+| Maternity cap | D31, both amendments | 16 weeks; then 112 calendar days | superseded under "no limits" — **not itemised by management; to be confirmed** (see below) |
+| Eid date ranges | D31, first amendment | admin enters ranges each year; table to be created | not needed; the table was never created |
+| Entitlement mechanics | D31, "rules behind the numbers" | no proration; months before `joined_on` carry nothing | gone |
+| Per-day split across months | D5, D31 | each day charged to the month it falls in | no month to charge |
+
+Every open question the two amendments raised is **moot**, not answered: public holidays beyond Eid,
+a request with no working days, whether the Maternity cap is per request, birth or year, whether the Eid
+2 are per occasion or a pool of 4, what happens to an Eid request when no range has been entered, and
+whether to add an Eid leave type.
+
+**The answer to D4 is now: there are none.** D4 asked where entitlements come from. They do not exist.
+The mock values in `src/data/leaveBalance.js` (Annual 15, Sick 10, Casual 5) were already superseded and
+are now obsolete.
+
+**The balance endpoint stays, with a new meaning.** `GET /api/v1/leave-balances` is kept, with the same
+scoping, but it reports **days taken, not days remaining**. There is no entitlement, so there is no total
+and no remaining figure. The frontend's balance cards (`LeavePage.jsx`, `Dashboard.jsx`) become
+**usage cards**: a UI change, which bears on [D39](#d39--response-shape-and-leave-balance-presentation)
+and [Phase 10](migration-plan.md#phase-10--frontend-cutover).
+
+**What this costs.** Stated plainly, because it is a lot. Phase 9 was built, tested and verified
+against the pool model: four commits (`6198a36` the decisions, `75937e6` the implementation and
+migration `010`, `57aaa03` the tests and end-to-end script, `19da2aa` the two amendments), 983 tests
+passing, and 161 end-to-end results against a real database. The pool half of that is now to be removed
+or rewritten. The counts below were taken from the files and test titles on 2026-10-08; the test split
+is by title and approximate, and should be confirmed when the work is done.
+
+- **The entitlement module goes.** `backend/src/services/leaveEntitlements.js` (208 lines) holds the
+  numbers, the type-to-pool map, the day-splitting and the over-balance rule. **Seven files import it:**
+  four production files (`leaveRepository.js`, `leaveBalanceService.js`, `leaveMutationService.js`,
+  `leaveSchemas.js`), the end-to-end script, and two test files. A few constants and helpers may move;
+  the rest is deleted.
+- **The over-balance check goes** from `leaveMutationService.js` (94 lines), and the usage read, the
+  `joined_on` read and the validation payload go from `leaveRepository.js` (289 lines).
+- **The balance service is rewritten.** `leaveBalanceService.js` (46 lines) computes entitlement minus
+  usage; it has to report usage only.
+- **The usage view was built for the pool model.** The second half of migration `010` replaced
+  `employee_leave_usage` with a view that splits every leave per calendar day into per-month counts.
+  Migrations are never edited, so changing or dropping it takes a **new migration**, which is not
+  written.
+- **Tests: about 89 of the 205 leave tests (43%) must be removed or rewritten.** About **73 are removed
+  outright** (all 56 in `leaveEntitlements.test.js`, 6 in the mutation service tests, 2 in the repository
+  tests, 6 in the route tests, 3 in the balance service tests) and about **16 are rewritten** (4, 5, 5 and
+  2 in those same four files). About 116 survive in substance; of those, 10 balance-scoping tests need
+  new fixtures, and 6 migration tests describe a view that is now dead weight and stay true only because
+  `010` cannot change.
+- **The end-to-end script is largely affected.** About 60 of its 150 check sites mention pools,
+  entitlement, balance or the view (23 are explicitly about the view). Two of its race proofs assert the
+  over-balance behaviour — one expects exactly 2 of 8 concurrent applies to be admitted, the other expects
+  a balance refusal from a waiting request — and must be redesigned around overlap. The view section,
+  which was the part most wanted verified against real Postgres, now checks a view the design may not need.
+- **Docs:** D4, D5, D31 and its two amendments, the notes under §4.8 and §4.12, D39, and
+  `migration-plan.md` Phases 9 and 10.
+- **Frontend:** the balance cards become usage cards.
+
+**What it does not cost.** The authorization service and its 20 tests; the decide, cancel and delete
+paths; the overlap check and its lock; the self-approval ban; the soft delete and its deleter column;
+the date serialisation; and the scoping of who may read a balance. Nothing is deployed, Phase 9 is not
+connected to the frontend, and no production leave data exists, so no user is affected.
+
+**Open — recorded, not decided:**
+- **What "days taken" counts.** Approved leave only, or approved and pending shown separately. Pending
+  requests used to reserve days against an allowance; that reason is gone.
+- **Over what period:** a calendar month, a calendar year, all time, or a requested `as_of`.
+- **Per leave type, in total, or both.**
+- **Whether a leave spanning two periods is split or attributed whole** — D5's two options again, now
+  with nothing forcing the split.
+- **The fate of `employee_leave_usage`:** reuse it as the basis of the days-taken figure, change it, or
+  drop it. Any of those is a new migration.
+- **Whether the 366-day `MAX_LEAVE_DAYS` bound in `leaveSchemas.js` stays.** It was never a management
+  rule: it bounded how many rows the per-day view could generate. With "no limits" it is the one limit
+  left in the code, so keeping it is a decision.
+- **Maternity.** Management did not itemise the 16-week cap, so superseding it rests on "no limits". The
+  figure was set by reference to Pakistan's Maternity Benefit Act, so it is worth confirming that a
+  cap is not wanted here.
+
+**Implemented 2026-10-08.** The rework under "What this costs"
+has been done. What was changed, and what it settled:
+- `leaveEntitlements.js` is deleted, with the over-balance check, the pool code and the 366-day bound;
+  `LEAVE_TYPES` now lives in `backend/src/utils/leaveTypes.js`.
+- **Migration `011_restore_leave_usage_view`** restores `employee_leave_usage` to its pre-`010` shape —
+  `leave_year` and `days_used`, approved leave only, each leave attributed whole to the year it starts in
+  — and its down file puts `010`'s per-month view back. `010` was not edited, and its `deleted_by` half
+  stands.
+- **`GET /api/v1/leave-balances` now reports days taken:** `{ employee_id, as_of, year, taken, total }`,
+  with all five leave types always present in `taken`. The `employee_id` and `as_of` parameters are
+  unchanged and only the year of `as_of` matters. Scoping is unchanged.
+- **Open questions this answered, by following from restoring the pre-`010` view** — so worth confirming
+  rather than assuming: only **approved** leave counts (a pending request is not counted until it is
+  approved); the figure is **per type and in total**; the period is a **calendar year**; a leave counts
+  **whole in the year it starts in**, so 30 December to 2 January is four days in the earlier year; the
+  view was **kept, restored**, not dropped; and `MAX_LEAVE_DAYS` was **dropped**, so a 400-day request is
+  accepted.
+- **Still open:** the Maternity cap (superseded under "no limits", not confirmed), and whether pending
+  requests should be shown separately from approved ones.
+- **Results:** the whole suite went from 983 to 934 tests, and the leave tests from 205 to 156, a net of
+  −49. By file, net: the entitlement tests −56 (the whole file), the mutation service tests −4, the route
+  tests −1, the repository tests +3, the balance service tests +2, the migration tests +7 (for `011`),
+  the authorization tests 0. Those are net figures: within them, pool tests were removed and the
+  remaining affected tests rewritten, and "no limits" regression tests were added. The end-to-end script went from 161 to 139 results and passed against `sigma_hrm_scratch`, again after
+  rolling `011` back and re-applying it; with the per-employee lock removed it fails exactly the two
+  race proofs that depend on it.
