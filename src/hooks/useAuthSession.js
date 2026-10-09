@@ -1,63 +1,17 @@
-import { useEffect, useState } from "react";
-import { observeAuthState, signOutUser } from "../services/authService";
-import {
-  AuthSessionError,
-  verifyAuthSession,
-} from "../services/authSessionService";
+import { useAuth } from "../auth/useAuth.js";
 
+// LoginPage and AppProvider still import these two keys from here.
 export const AUTH_ROLE_STORAGE_KEY = "sigma-hrm-selected-role";
 export const AUTH_ROLE_ERROR_STORAGE_KEY = "sigma-hrm-role-error";
 
-const safeVerificationError = (error) =>
-  error instanceof AuthSessionError
-    ? error
-    : new AuthSessionError("internal");
-
-const attemptSignOut = () => {
-  try {
-    return Promise.resolve(signOutUser()).catch(() => {});
-  } catch {
-    return Promise.resolve();
-  }
-};
-
+/**
+ * { user, authReady, seeding }, as the Firebase-backed hook returned them, now from the auth context: a session
+ * restored from the refresh cookie on boot (POST /auth/refresh, then GET /auth/me) or started by LoginPage.
+ *
+ * The role the person picked is no longer re-verified on every session start (D37): it is checked once, at sign-in,
+ * by verifyAuthSession. A reload or a new tab restores the session without picking a role again.
+ */
 export function useAuthSession() {
-  const [user, setUser] = useState(null);
-  const [authReady, setAuthReady] = useState(false);
-
-  useEffect(() => {
-    const unsubscribe = observeAuthState(async (firebaseUser) => {
-      if (firebaseUser) {
-        setUser(null);
-        try {
-          const selectedRole = sessionStorage.getItem(AUTH_ROLE_STORAGE_KEY);
-          const principal = await verifyAuthSession(selectedRole);
-          if (principal?.linkage !== "uid" || !principal.employee) {
-            throw new AuthSessionError("data-integrity");
-          }
-
-          setUser(principal.employee);
-        } catch (error) {
-          const verificationError = safeVerificationError(error);
-          const signOutPromise = attemptSignOut();
-
-          setUser(null);
-          try {
-            sessionStorage.removeItem(AUTH_ROLE_STORAGE_KEY);
-            sessionStorage.setItem(AUTH_ROLE_ERROR_STORAGE_KEY, verificationError.code);
-          } catch {
-            // Sign-out still proceeds when session storage is unavailable.
-          }
-          await signOutPromise;
-        }
-      } else {
-        setUser(null);
-      }
-      setAuthReady(true);
-    });
-
-    return unsubscribe;
-  }, []);
-
-  return { user, authReady, seeding: false };
+  const { user, authReady, seeding } = useAuth();
+  return { user, authReady, seeding };
 }

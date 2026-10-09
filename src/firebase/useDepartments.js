@@ -1,68 +1,23 @@
-import { useCallback, useMemo } from "react";
-import {
-  useCollectionResource,
-  withCollectionSubscription,
-} from "../hooks/useCollectionResource";
-import { createCollectionSource } from "../services/firestoreService";
+import { useCollectionAccess } from "./useFirestore.js";
+import { useCollectionResource } from "../hooks/useCollectionResource";
+import { departmentService } from "../services/departmentService.js";
 
-const DEPARTMENTS_COLLECTION = "departments";
-
-export function getDepartmentReadPlan(principal) {
-  const employee = principal?.employee;
-  const employeeId = typeof employee?.id === "string" ? employee.id.trim() : "";
-  const role = typeof employee?.role === "string" ? employee.role : "";
-
-  if (
-    principal?.linkage === "uid"
-    && employeeId
-    && (role === "admin" || role === "hr")
-  ) {
-    return {
-      enabled: true,
-      queryScope: `departments:${role}:all`,
-      sources: [createCollectionSource()],
-    };
-  }
-
-  return {
-    enabled: false,
-    queryScope: `departments:${role || "invalid"}:disabled`,
-    sources: [],
-  };
-}
+// Only admin and hr can read the departments list (D33). Everyone else learns department names from the
+// employees and projects they can already see, and the services keep that directory (departmentDirectory.js).
+const DEPARTMENT_READERS = new Set(["admin", "hr"]);
 
 export function useDepartments(collectionAccess) {
-  const principal = collectionAccess?.principal;
-  const employeeId = principal?.employee?.id;
-  const employeeRole = principal?.employee?.role;
-  const linkage = principal?.linkage;
-  const readPlan = useMemo(
-    () => getDepartmentReadPlan({
-      linkage,
-      employee: { id: employeeId, role: employeeRole },
-    }),
-    [employeeId, employeeRole, linkage],
-  );
-  const departmentAccess = useMemo(
-    () => withCollectionSubscription(collectionAccess, readPlan),
-    [collectionAccess, readPlan],
-  );
-  const resource = useCollectionResource(DEPARTMENTS_COLLECTION, departmentAccess);
-  const { create } = resource;
-
-  const addDepartment = useCallback((department) =>
-    create({
-      ...department,
-      createdAt: new Date().toISOString(),
-    }),
-  [create]);
+  const departmentAccess = useCollectionAccess("departments", collectionAccess, DEPARTMENT_READERS, departmentService.list);
+  const resource = useCollectionResource("departments", { ...departmentAccess, service: departmentService });
 
   return {
     departments: resource.data,
     loading: resource.loading,
     error: resource.error || resource.mutationError,
+    // The LOAD error alone: `error` above also carries a failed write, which must not read as a failed load.
+    loadError: resource.error,
     isMutating: resource.isMutating,
-    addDepartment,
+    addDepartment: resource.create,
     updateDepartment: resource.update,
     deleteDepartment: resource.remove,
   };

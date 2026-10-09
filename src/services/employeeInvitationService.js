@@ -1,5 +1,12 @@
-import { httpsCallable } from "firebase/functions";
-import { functions } from "../firebase/firebaseConfig";
+import { employeeService } from "./employeeService.js";
+import { legacyCodeFor } from "./mutationErrors.js";
+import { pollingHub } from "./polling.js";
+
+// Creating an employee (POST /employees). Under Firebase this created a login and sent an invitation; under the
+// API it creates the employee and a user in the `invited` state with no password (D25), and a later step (an
+// admin or hr issuing a setup link, D34) lets the person set one.
+//
+// `status` may be "active" or "inactive" (D35): an inactive employee is created in a disabled state.
 
 const PROFILE_FIELDS = [
   "name",
@@ -25,8 +32,6 @@ const ERROR_MESSAGES = {
   internal: "Employee invitation could not be completed.",
 };
 
-const callableInviteEmployee = httpsCallable(functions, "inviteEmployee");
-
 export class EmployeeInvitationError extends Error {
   constructor(code, message) {
     super(message);
@@ -36,10 +41,7 @@ export class EmployeeInvitationError extends Error {
 }
 
 function invalidProfileError() {
-  return new EmployeeInvitationError(
-    "invalid-argument",
-    ERROR_MESSAGES["invalid-argument"],
-  );
+  return new EmployeeInvitationError("invalid-argument", ERROR_MESSAGES["invalid-argument"]);
 }
 
 function isPlainObject(value) {
@@ -50,43 +52,28 @@ function isPlainObject(value) {
 
 function profilePayload(profile) {
   if (!isPlainObject(profile)) throw invalidProfileError();
-
-  const suppliedFields = Object.keys(profile);
-  if (suppliedFields.some((field) => !PROFILE_FIELDS.includes(field))) {
-    throw invalidProfileError();
-  }
+  if (Object.keys(profile).some((field) => !PROFILE_FIELDS.includes(field))) throw invalidProfileError();
 
   return PROFILE_FIELDS.reduce((payload, field) => {
-    if (Object.prototype.hasOwnProperty.call(profile, field)) {
-      payload[field] = profile[field];
-    }
+    if (Object.hasOwn(profile, field)) payload[field] = profile[field];
     return payload;
   }, {});
 }
 
-function normalizedCallableCode(error) {
-  let rawCode;
-  try {
-    rawCode = typeof error?.code === "string" ? error.code : "";
-  } catch {
-    return "internal";
-  }
-
-  const code = rawCode.startsWith("functions/")
-    ? rawCode.slice("functions/".length)
-    : rawCode;
-  return Object.prototype.hasOwnProperty.call(ERROR_MESSAGES, code) ? code : "internal";
-}
-
 function safeInvitationError(error) {
-  const code = normalizedCallableCode(error);
+  const mapped = legacyCodeFor(error);
+  const code = Object.hasOwn(ERROR_MESSAGES, mapped) ? mapped : "internal";
   return new EmployeeInvitationError(code, ERROR_MESSAGES[code]);
 }
 
+/** Resolves the created employee (page-shaped, with the server's `id` and the `email` to send the setup link to). */
 export async function inviteEmployee(profile) {
   try {
-    const result = await callableInviteEmployee(profilePayload(profile));
-    return result.data;
+    const created = await employeeService.create(profilePayload(profile));
+    // EmployeesPage calls this directly, not through a data hook, so nothing would re-poll for it: do it here,
+    // or the new employee would not appear for up to a poll interval.
+    pollingHub.pollAllNow().catch(() => {});
+    return created;
   } catch (error) {
     if (error instanceof EmployeeInvitationError) throw error;
     throw safeInvitationError(error);
