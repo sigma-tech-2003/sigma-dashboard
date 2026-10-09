@@ -11,6 +11,7 @@ export { default as FormActions } from "./form-actions/FormActions";
 export { default as FormFeedback } from "./form-feedback/FormFeedback";
 export { default as FormField } from "./form-field/FormField";
 export { default as Input } from "./input/Input";
+export { default as LoadErrorGate } from "./load-error/LoadErrorGate";
 export { default as Modal } from "./modal/Modal";
 export { default as PageHeader } from "./page-header/PageHeader";
 export { default as Pagination } from "./pagination/Pagination";

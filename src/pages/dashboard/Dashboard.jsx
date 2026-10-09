@@ -17,6 +17,7 @@ import { fmt, pct, fdate, getKpiRatingSummary, getProjectKpiRatingLabel, isValid
 import { scopeAttendance, scopeEmployees, scopeByEmployee, scopeProjectKpis } from "../../utils/permissions";
 import { ANNOUNCEMENTS } from "../../data/announcements";
 import Stat        from "../../components/stat/Stat";
+import LoadErrorGate from "../../components/load-error/LoadErrorGate";
 import Badge       from "../../components/badge/Badge";
 import Avatar      from "../../components/avatar/Avatar";
 import Card        from "../../components/card/Card";
@@ -932,7 +933,7 @@ const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendan
 };
 
 // ─────────────────────────────────────────────────────────────────────────
-const Dashboard = (props) => {
+const RoleDashboard = (props) => {
   switch (props.user.role) {
     case "hr":       return <HRDashboard      {...props} />;
     case "manager":  return <ManagerDashboard {...props} />;
@@ -940,6 +941,31 @@ const Dashboard = (props) => {
     case "employee": return <EmployeeDashboard {...props} />;
     default:         return <AdminDashboard   {...props} />; // "admin"
   }
+};
+
+// The collections each role's dashboard cannot do without. If one of these failed to LOAD and has nothing to
+// show, every figure derived from it would read as zero, so the dashboard says so instead of rendering them.
+// Collections a role cannot read at all (payroll for a manager) never error and are simply empty.
+const REQUIRED_COLLECTIONS = {
+  admin:    ["employees", "projects", "kpis", "attendance", "leaves", "payroll"],
+  hr:       ["employees", "projects", "kpis", "attendance", "leaves", "payroll"],
+  manager:  ["employees", "projects", "kpis", "attendance", "leaves"],
+  tl:       ["employees", "projects", "kpis", "attendance", "leaves"],
+  employee: ["employees", "projects", "kpis", "attendance", "leaves", "payroll"],
+};
+
+const Dashboard = (props) => {
+  const names = REQUIRED_COLLECTIONS[props.user.role] ?? REQUIRED_COLLECTIONS.admin;
+  const required = Object.fromEntries(names.map((name) => [name, props[name]]));
+  // Secondary: the admin dashboard falls back to employees when departments is missing, and the employee's leave
+  // usage is one card. Their failures are flagged but never blank the page. (leaveBalances is a map, not a list.)
+  const optional = { departments: props.departments, leaveBalances: Object.values(props.leaveBalances ?? {}) };
+
+  return (
+    <LoadErrorGate errors={props.dataErrors} required={required} optional={optional}>
+      <RoleDashboard {...props} />
+    </LoadErrorGate>
+  );
 };
 
 export default Dashboard;

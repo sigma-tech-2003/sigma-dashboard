@@ -55,6 +55,7 @@ function AuthenticatedWorkspace({
     employees,
     loading: employeesLoading,
     error: employeesError,
+    loadError: employeesLoadError,
     addEmployee,
     updateEmployee,
     deleteEmployee,
@@ -63,6 +64,7 @@ function AuthenticatedWorkspace({
     projects,
     loading: projectsLoading,
     error: projectsError,
+    loadError: projectsLoadError,
     addProject,
     updateProject,
     deleteProject,
@@ -71,6 +73,7 @@ function AuthenticatedWorkspace({
     kpis,
     loading: kpisLoading,
     error: kpisError,
+    loadError: kpisLoadError,
     addKpi,
     updateKpi,
   } = useKpis(collectionAccess, scopedWorkspace);
@@ -78,6 +81,7 @@ function AuthenticatedWorkspace({
     attendance,
     loading: attendanceLoading,
     error: attendanceError,
+    loadError: attendanceLoadError,
     addAttendance,
     updateAttendance,
     deleteAttendance,
@@ -86,6 +90,7 @@ function AuthenticatedWorkspace({
     leaves,
     loading: leavesLoading,
     error: leavesError,
+    loadError: leavesLoadError,
     addLeave,
     updateLeaveStatus,
   } = useLeaves(collectionAccess, employees, employeesLoading);
@@ -93,6 +98,7 @@ function AuthenticatedWorkspace({
     payroll,
     loading: payrollLoading,
     error: payrollError,
+    loadError: payrollLoadError,
     addPayroll,
     updatePayrollStatus,
   } = usePayroll(collectionAccess);
@@ -100,11 +106,13 @@ function AuthenticatedWorkspace({
     leaveBalances,
     loading: leaveBalancesLoading,
     error: leaveBalancesError,
+    loadError: leaveBalancesLoadError,
   } = useLeaveBalances(collectionAccess);
   const {
     departments,
     loading: departmentsLoading,
     error: departmentsError,
+    loadError: departmentsLoadError,
     addDepartment,
     updateDepartment,
     deleteDepartment,
@@ -130,6 +138,18 @@ function AuthenticatedWorkspace({
     leaveBalancesError,
     departmentsError,
   ].find(Boolean);
+  // What failed to LOAD, by collection, for the pages that must say so rather than render zeros. (`dataError`
+  // above also folds in failed writes, and is only reported, never shown.)
+  const dataErrors = {
+    employees: employeesLoadError,
+    projects: projectsLoadError,
+    kpis: kpisLoadError,
+    attendance: attendanceLoadError,
+    leaves: leavesLoadError,
+    payroll: payrollLoadError,
+    leaveBalances: leaveBalancesLoadError,
+    departments: departmentsLoadError,
+  };
   const requestedRoute = getRouteById(routeId);
   const activeRoute = canAccessRoute(user, requestedRoute)
     ? requestedRoute
@@ -193,6 +213,7 @@ function AuthenticatedWorkspace({
     addDepartment,
     updateDepartment,
     deleteDepartment,
+    dataErrors,
   };
 
   return (

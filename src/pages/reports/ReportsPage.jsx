@@ -21,6 +21,7 @@ import {
   ProgressBar,
 } from "../../components";
 import Stat from "../../components/stat/Stat";
+import LoadErrorGate from "../../components/load-error/LoadErrorGate";
 import { fdate, fmt, getKpiRatingSummary, pct } from "../../utils/helpers";
 import {
   scopeByEmployee,
@@ -70,7 +71,7 @@ const DistributionCard = ({ title, rows, total, emptyMessage }) => (
   </Card>
 );
 
-const ReportsPage = ({
+const ReportsPageContent = ({
   user,
   employees = [],
   projects = [],
@@ -300,5 +301,21 @@ const ReportsPage = ({
     </div>
   );
 };
+
+// A failed load must not look like a report of zeros.
+const ReportsPage = (props) => (
+  <LoadErrorGate
+    errors={props.dataErrors}
+    required={{
+      employees: props.employees,
+      projects: props.projects,
+      kpis: props.kpis,
+      leaves: props.leaves,
+      payroll: props.payroll,
+    }}
+  >
+    <ReportsPageContent {...props} />
+  </LoadErrorGate>
+);
 
 export default ReportsPage;

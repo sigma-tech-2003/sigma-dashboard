@@ -11,10 +11,11 @@ import Input         from "../../components/input/Input";
 import Select        from "../../components/select/Select";
 import Btn           from "../../components/btn/Btn";
 import PayslipModal  from "./PayslipModal";
+import LoadErrorGate from "../../components/load-error/LoadErrorGate";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-const PayrollPage = ({ payroll, addPayroll, updatePayrollStatus, employees }) => {
+const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employees }) => {
   const [modal,  setModal]  = useState(false);
   const [slip,   setSlip]   = useState(null);
   const [selEmp, setSelEmp] = useState("");
@@ -188,5 +189,12 @@ const PayrollPage = ({ payroll, addPayroll, updatePayrollStatus, employees }) =>
     </div>
   );
 };
+
+// A failed load must not look like an empty payroll: say so instead of rendering a table with no rows.
+const PayrollPage = (props) => (
+  <LoadErrorGate errors={props.dataErrors} required={{ payroll: props.payroll, employees: props.employees }}>
+    <PayrollPageContent {...props} />
+  </LoadErrorGate>
+);
 
 export default PayrollPage;

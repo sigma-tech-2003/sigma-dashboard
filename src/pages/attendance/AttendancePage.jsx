@@ -31,6 +31,7 @@ import {
   Textarea,
 } from "../../components";
 import Stat from "../../components/stat/Stat";
+import LoadErrorGate from "../../components/load-error/LoadErrorGate";
 import { fdate } from "../../utils/helpers";
 import {
   can,
@@ -160,7 +161,7 @@ const isValidDateValue = (value) => {
   return toLocalDateValue(date) === value;
 };
 
-const AttendancePage = ({
+const AttendancePageContent = ({
   user,
   employees = [],
   attendance = [],
@@ -745,5 +746,12 @@ const AttendancePage = ({
     </div>
   );
 };
+
+// A failed load must not look like "no attendance records found".
+const AttendancePage = (props) => (
+  <LoadErrorGate errors={props.dataErrors} required={{ attendance: props.attendance, employees: props.employees }}>
+    <AttendancePageContent {...props} />
+  </LoadErrorGate>
+);
 
 export default AttendancePage;

@@ -1,0 +1,65 @@
+.load-error {
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
+  background: var(--color-danger-glow);
+  color: var(--color-danger);
+}
+
+.load-error__icon {
+  flex: none;
+}
+
+/* The page body could not be shown at all. Same footprint as EmptyState so the layout does not jump. */
+.load-error--blocked {
+  padding: var(--space-11);
+  border-radius: var(--radius-xl);
+  text-align: center;
+}
+
+.load-error--blocked .load-error__icon {
+  margin-bottom: var(--space-5);
+}
+
+.load-error__title {
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+}
+
+.load-error__description {
+  margin-top: var(--space-1);
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
+.load-error__actions {
+  margin-top: var(--space-6);
+}
+
+.load-error__hint {
+  margin-top: var(--space-3);
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* Data is on screen but could not be refreshed. */
+.load-error--banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-sm);
+}
+
+.load-error__text {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text);
+}
+
+@media (max-width: 640px) {
+  .load-error--banner {
+    flex-wrap: wrap;
+  }
+}
