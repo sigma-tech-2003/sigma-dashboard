@@ -7,7 +7,7 @@ import { session } from "./session.js";
 // on boot (POST /auth/refresh, then GET /auth/me).
 
 export function AuthProvider({ children }) {
-  const { user, authReady } = useSyncExternalStore(session.subscribe, session.getState, session.getState);
+  const { user, authReady, mustChangePassword } = useSyncExternalStore(session.subscribe, session.getState, session.getState);
 
   // React StrictMode runs this twice in development; restore() shares one run between concurrent callers, so
   // the single-use refresh cookie is presented once.
@@ -22,10 +22,11 @@ export function AuthProvider({ children }) {
     user,
     authReady,
     seeding: false,
+    mustChangePassword,
     login: session.login,
     logout: session.logout,
     refreshProfile: session.refreshProfile,
-  }), [user, authReady]);
+  }), [user, authReady, mustChangePassword]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

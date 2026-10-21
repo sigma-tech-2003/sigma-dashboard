@@ -1,7 +1,7 @@
 // src/pages/employees/EmployeesPage.jsx
 
 import { useRef, useState } from "react";
-import { Plus, Search, Edit, Trash2, Check, Eye } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Check, Eye, KeyRound } from "lucide-react";
 
 import { T }        from "../../theme/theme";
 import { fmt, fdate } from "../../utils/helpers";
@@ -15,12 +15,15 @@ import Btn     from "../../components/btn/Btn";
 import {
   EmployeeInvitationError,
   inviteEmployee,
+  resetEmployeePassword,
 } from "../../services/employeeInvitationService";
-import {
-  EmployeePasswordSetupError,
-  sendEmployeePasswordSetupEmail,
-} from "../../services/authService";
 import { EmployeeMutationError } from "../../services/employeeMutationService";
+import {
+  CREATE_DEPARTMENT_VALUE,
+  createDepartmentMessage,
+  departmentOptions,
+} from "../../utils/departmentOptions";
+import { canResetPassword } from "../../utils/passwordReset";
 
 const removePasswordFields = (employee) => {
   const sanitizedEmployee = { ...employee };
@@ -44,9 +47,16 @@ const canonicalEmployeeDocumentId = (employee) => {
   return id;
 };
 
+// D41: there is no setup email or link. Whoever creates an employee sets a temporary password and tells the employee
+// themselves; the employee must replace it at first sign-in.
+const TEMPORARY_PASSWORD_MESSAGE = "Enter a temporary password of 8 to 200 characters.";
+const isValidTemporaryPassword = (value) =>
+  typeof value === "string" && value.length >= 8 && value.length <= 200;
+
 const EmployeesPage = ({
   employees, updateEmployee, deleteEmployee,
   departments,  // ← new: for dropdown + filter
+  addDepartment,
   user,
 }) => {
   const [search,     setSearch]     = useState("");
@@ -57,11 +67,19 @@ const EmployeesPage = ({
   const [saving,     setSaving]     = useState(false);
   const [formError,  setFormError]  = useState("");
   const [notice,     setNotice]     = useState(null);
-  const [resending,  setResending]  = useState(false);
+  const [resetTarget,   setResetTarget]   = useState(null);  // the employee whose password is being reset
+  const [resetPassword,   setResetPassword]   = useState("");
+  const [resetting,       setResetting]       = useState(false);
+  const [resetError,      setResetError]      = useState("");
+  const [creatingDept,    setCreatingDept]    = useState(false); // the inline "Create department" field is open
+  const [newDeptName,     setNewDeptName]     = useState("");
+  const [deptSaving,      setDeptSaving]      = useState(false);
+  const [deptError,       setDeptError]       = useState("");
   const [editEmployeeDocumentId, setEditEmployeeDocumentId] = useState(null);
   const [deletingEmployeeDocumentId, setDeletingEmployeeDocumentId] = useState(null);
   const saveInFlight = useRef(false);
-  const resendInFlight = useRef(false);
+  const resetInFlight = useRef(false);
+  const deptInFlight = useRef(false);
   const deleteInFlight = useRef(new Set());
 
   // Active departments for dropdown
@@ -74,8 +92,12 @@ const EmployeesPage = ({
   // Which roles can this user assign to a new/edited employee?
   const myAssignableRoles = assignableRoles(user);
 
+  // What the department dropdown offers this role (D42): admin can also create one, HR sees a hint,
+  // manager/TL get their own department as the single, locked option.
+  const deptChoices = departmentOptions(user, departments, form.dept);
+
   // Manager/TL are locked to their own department when adding people
-  const deptLocked = user.role === "manager" || user.role === "tl";
+  const deptLocked = deptChoices.locked;
 
   const teamLeadOptions = employees.filter(employee =>
     employee.role === "tl" &&
@@ -93,13 +115,21 @@ const EmployeesPage = ({
   });
 
   // ── Handlers ─────────────────────────────────────────────────────
+  const resetDepartmentCreation = () => {
+    setCreatingDept(false);
+    setNewDeptName("");
+    setDeptError("");
+  };
+
   const openAdd = () => {
     setFormError("");
     setNotice(null);
+    resetDepartmentCreation();
     setForm({
       role:       myAssignableRoles[0] || "employee",
       status:     "active",
       allowances: 0,
+      temporaryPassword: "",
       dept:       deptLocked ? user.dept : "",
       ...(user.role === "tl" ? { teamLeadId: user.id } : {}),
     });
@@ -115,6 +145,7 @@ const EmployeesPage = ({
       return;
     }
     setFormError("");
+    resetDepartmentCreation();
     setForm(removePasswordFields(emp));
     setEditEmployeeDocumentId(employeeDocumentId);
     setModal("edit");
@@ -125,6 +156,75 @@ const EmployeesPage = ({
     setModal(null);
     setFormError("");
     setEditEmployeeDocumentId(null);
+    resetDepartmentCreation();
+  };
+
+  // D42: admin creates a department without leaving the form, and it becomes the selected one.
+  const createDepartment = async () => {
+    const name = newDeptName.trim();
+    if (!name) { setDeptError("Enter a department name."); return; }
+    if (deptInFlight.current) return;
+
+    deptInFlight.current = true;
+    setDeptSaving(true);
+    setDeptError("");
+    try {
+      await addDepartment({ name, description: "", status: "Active" });
+      setForm(p => ({ ...p, dept: name, teamLeadId: "" }));
+      resetDepartmentCreation();
+    } catch (error) {
+      setDeptError(createDepartmentMessage(error, name));
+    } finally {
+      deptInFlight.current = false;
+      setDeptSaving(false);
+    }
+  };
+
+  // D41: admin or hr give an existing employee a new temporary password.
+  const openReset = (emp) => {
+    const employeeDocumentId = canonicalEmployeeDocumentId(emp);
+    if (!employeeDocumentId) {
+      setNotice({
+        type: "warning",
+        message: "This employee's password cannot be reset because its canonical identifier is unavailable.",
+      });
+      return;
+    }
+    setResetError("");
+    setResetPassword("");
+    setResetTarget({ id: employeeDocumentId, name: emp.name });
+  };
+
+  const closeReset = () => {
+    if (resetting) return;
+    setResetTarget(null);
+    setResetPassword("");
+    setResetError("");
+  };
+
+  const submitReset = async () => {
+    if (resetInFlight.current || !resetTarget) return;
+    if (!isValidTemporaryPassword(resetPassword)) { setResetError(TEMPORARY_PASSWORD_MESSAGE); return; }
+
+    resetInFlight.current = true;
+    setResetting(true);
+    setResetError("");
+    try {
+      await resetEmployeePassword(resetTarget.id, resetPassword);
+      setNotice({
+        type: "success",
+        message: `Password reset for ${resetTarget.name || "the employee"}. Give them the temporary password yourself; they must choose their own the next time they sign in, and their current sessions have ended.`,
+      });
+      setResetTarget(null);
+      setResetPassword("");
+    } catch (error) {
+      setResetError(error instanceof EmployeeInvitationError
+        ? error.message
+        : "The password could not be reset. Please try again.");
+    } finally {
+      resetInFlight.current = false;
+      setResetting(false);
+    }
   };
 
   const editableEmployeeProfile = () => {
@@ -164,6 +264,8 @@ const EmployeesPage = ({
       joinDate: String(form.joinDate || "").trim(),
       role,
       status,
+      // As typed: a password is never trimmed.
+      temporaryPassword: String(form.temporaryPassword || ""),
     };
     const teamLeadId = user.role === "tl" ? user.id : form.teamLeadId;
 
@@ -181,31 +283,6 @@ const EmployeesPage = ({
     setNotice(nextNotice);
   };
 
-  const resendSetupEmail = async () => {
-    if (!notice?.email || resendInFlight.current) return;
-
-    resendInFlight.current = true;
-    setResending(true);
-    try {
-      await sendEmployeePasswordSetupEmail(notice.email);
-      setNotice({
-        type: "success",
-        message: "Employee account created and password-setup email sent.",
-      });
-    } catch (error) {
-      const message = error instanceof EmployeePasswordSetupError
-        ? error.message
-        : "Password setup email could not be sent. Please try again.";
-      setNotice(current => ({
-        ...current,
-        message: `The employee account is ready, but the password-setup email was not sent. ${message}`,
-      }));
-    } finally {
-      resendInFlight.current = false;
-      setResending(false);
-    }
-  };
-
   const save = async () => {
     if (saveInFlight.current) return;
 
@@ -215,42 +292,31 @@ const EmployeesPage = ({
     try {
       if (modal === "add") {
         const profile = invitationProfile();
-        let invitation;
+
+        if (!isValidTemporaryPassword(profile.temporaryPassword)) {
+          setFormError(TEMPORARY_PASSWORD_MESSAGE);
+          return;
+        }
 
         try {
-          invitation = await inviteEmployee(profile);
+          await inviteEmployee(profile);
         } catch (error) {
           const message = error instanceof EmployeeInvitationError
             ? error.message
-            : "Employee invitation could not be completed.";
+            : "The employee could not be created.";
           setFormError(message);
           return;
         }
 
-        if (profile.status === "inactive") {
-          finishInvitation({
-            type: "warning",
-            message: "Inactive employee account created in a disabled state. No password-setup email was sent.",
-          });
-          return;
-        }
-
-        try {
-          await sendEmployeePasswordSetupEmail(invitation.email);
-          finishInvitation({
-            type: "success",
-            message: "Employee account created and password-setup email sent.",
-          });
-        } catch (error) {
-          const message = error instanceof EmployeePasswordSetupError
-            ? error.message
-            : "Password setup email could not be sent. Please try again.";
-          finishInvitation({
-            type: "warning",
-            email: invitation.email,
-            message: `The employee account was created, but the password-setup email was not sent. ${message}`,
-          });
-        }
+        finishInvitation(profile.status === "inactive"
+          ? {
+              type: "warning",
+              message: "Inactive employee account created in a disabled state. It cannot sign in until the employee is made active.",
+            }
+          : {
+              type: "success",
+              message: `Employee account created. Give ${profile.name || "the employee"} the temporary password you set; they must choose their own the first time they sign in.`,
+            });
         return;
       } else {
         if (!editEmployeeDocumentId) {
@@ -347,12 +413,7 @@ const EmployeesPage = ({
             fontWeight: 600,
           }}
         >
-          <span>{notice.message}</span>
-          {notice.email && (
-            <Btn variant="outline" sm onClick={resendSetupEmail} disabled={resending}>
-              {resending ? "Sending…" : "Resend setup email"}
-            </Btn>
-          )}
+          <span style={{ overflowWrap: "anywhere" }}>{notice.message}</span>
         </div>
       )}
 
@@ -447,6 +508,14 @@ const EmployeesPage = ({
                           style={{ background: T.warningTint, border: "none", color: T.warning, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}
                         ><Edit size={13} /></button>
                       )}
+                      {canResetPassword(user, emp) && (
+                        <button
+                          onClick={() => openReset(emp)}
+                          aria-label={`Reset password for ${emp.name || "employee"}`}
+                          title="Reset password"
+                          style={{ background: T.primaryGlow, border: "none", color: T.primary, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}
+                        ><KeyRound size={13} /></button>
+                      )}
                       {(user.role === "admin" || user.role === "hr") && (
                         <button
                           onClick={() => del(emp)}
@@ -475,18 +544,49 @@ const EmployeesPage = ({
             <Input label="Email"        value={form.email      || ""} onChange={e => setForm(p => ({ ...p, email:      e.target.value }))} type="email" disabled={saving} />
             <Input label="Phone"        value={form.phone      || ""} onChange={e => setForm(p => ({ ...p, phone:      e.target.value }))} disabled={saving} />
 
-            {/* Department — now a dropdown from Firestore ← changed */}
-            <Select
-              label="Department"
-              value={form.dept || ""}
-              onChange={e => setForm(p => ({ ...p, dept: e.target.value, teamLeadId: "" }))}
-              disabled={deptLocked || saving}
-            >
-              <option value="">— Select Department —</option>
-              {(deptLocked ? activeDepts.filter(d => d.name === user.dept) : activeDepts).map(d => (
-                <option key={d.id} value={d.name}>{d.name}</option>
-              ))}
-            </Select>
+            {/* Department (D42): admin can also create one here; HR sees a hint; manager/TL are locked to their own. */}
+            <div>
+              <Select
+                label="Department"
+                value={deptLocked ? (deptChoices.options[0]?.value ?? "") : creatingDept ? CREATE_DEPARTMENT_VALUE : form.dept || ""}
+                onChange={e => {
+                  if (e.target.value === CREATE_DEPARTMENT_VALUE) { setCreatingDept(true); setDeptError(""); return; }
+                  setCreatingDept(false);
+                  setForm(p => ({ ...p, dept: e.target.value, teamLeadId: "" }));
+                }}
+                disabled={deptLocked || saving}
+                hint={deptChoices.hint || undefined}
+              >
+                {!deptLocked && <option value="">— Select Department —</option>}
+                {deptChoices.options.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+                {modal === "add" && deptChoices.canCreate && (
+                  <option value={CREATE_DEPARTMENT_VALUE}>+ Create department…</option>
+                )}
+              </Select>
+              {modal === "add" && deptChoices.canCreate && creatingDept && (
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <Input
+                      label="New department name"
+                      value={newDeptName}
+                      onChange={e => { setNewDeptName(e.target.value); setDeptError(""); }}
+                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); createDepartment(); } }}
+                      error={deptError || undefined}
+                      disabled={saving || deptSaving}
+                      autoFocus
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: 6, paddingTop: 22 }}>
+                    <Btn sm onClick={createDepartment} disabled={saving || deptSaving}>
+                      {deptSaving ? "Creating…" : "Create"}
+                    </Btn>
+                    <Btn sm variant="ghost" onClick={resetDepartmentCreation} disabled={deptSaving}>Cancel</Btn>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <Input label="Position"     value={form.pos        || ""} onChange={e => setForm(p => ({ ...p, pos:        e.target.value }))} disabled={saving} />
             <Input label="Basic Salary" value={form.basic      || ""} onChange={e => setForm(p => ({ ...p, basic:      e.target.value }))} type="number" disabled={saving || (modal === "edit" && user.role !== "admin" && user.role !== "hr")} />
@@ -514,6 +614,16 @@ const EmployeesPage = ({
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </Select>
+            {modal === "add" && (
+              <Input
+                label="Temporary password"
+                value={form.temporaryPassword || ""}
+                onChange={e => setForm(p => ({ ...p, temporaryPassword: e.target.value }))}
+                autoComplete="off"
+                hint="8 to 200 characters. Tell the employee yourself; they must replace it at first sign-in."
+                disabled={saving}
+              />
+            )}
             {modal === "add" && form.role === "employee" && user.role !== "tl" && (
               <Select
                 label="Team Lead (optional)"
@@ -550,7 +660,50 @@ const EmployeesPage = ({
               <Check size={13} />
               {saving
                 ? modal === "add" ? "Creating…" : "Saving…"
-                : modal === "add" ? "Create & Invite" : "Save Changes"}
+                : modal === "add" ? "Create Employee" : "Save Changes"}
+            </Btn>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Reset password modal (D41) ──────────────────────────── */}
+      {resetTarget && (
+        <Modal title="Reset Password" onClose={closeReset}>
+          <div style={{ fontSize: 13, color: T.mutedLight, lineHeight: 1.5, marginBottom: 12 }}>
+            Set a new temporary password for <strong style={{ color: T.text }}>{resetTarget.name}</strong>. Their
+            current sessions end, and they must choose their own password the next time they sign in.
+          </div>
+          <Input
+            label="Temporary password"
+            value={resetPassword}
+            onChange={e => { setResetPassword(e.target.value); setResetError(""); }}
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); submitReset(); } }}
+            autoComplete="off"
+            hint="8 to 200 characters. Tell the employee yourself."
+            disabled={resetting}
+            autoFocus
+          />
+          {resetError && (
+            <div
+              role="alert"
+              style={{
+                marginTop: 8,
+                padding: "10px 12px",
+                borderRadius: 8,
+                background: T.dangerGlow,
+                color: T.danger,
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {resetError}
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+            <Btn variant="ghost" onClick={closeReset} disabled={resetting}>Cancel</Btn>
+            <Btn onClick={submitReset} disabled={resetting}>
+              <KeyRound size={13} />
+              {resetting ? "Resetting…" : "Reset password"}
             </Btn>
           </div>
         </Modal>

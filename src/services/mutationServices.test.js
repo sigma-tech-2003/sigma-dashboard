@@ -3,9 +3,8 @@ import test, { afterEach } from "node:test";
 import { created, failure, installFakeFetch, noContent, ok } from "../test-support/fakes.js";
 import { departmentDirectory } from "./departmentDirectory.js";
 import { pollingHub } from "./polling.js";
-import { EmployeeInvitationError, inviteEmployee } from "./employeeInvitationService.js";
+import { EmployeeInvitationError, inviteEmployee, resetEmployeePassword } from "./employeeInvitationService.js";
 import { deleteEmployee, EmployeeMutationError, updateEmployee } from "./employeeMutationService.js";
-import { EmployeePasswordSetupError, sendEmployeePasswordSetupEmail } from "./authService.js";
 import { createKpi, deleteKpi, KpiMutationError, updateKpi } from "./kpiMutationService.js";
 import { createProject, deleteProject, ProjectMutationError, updateProject } from "./projectMutationService.js";
 
@@ -26,7 +25,7 @@ const EMPLOYEE_ROW = {
   full_name: "Aisha Khan", phone: null, position_title: "Engineer", employment_status: "active",
   joined_on: "2024-03-15", basic: 100, allowances: 10, role: "employee", email: "aisha@b.co", created_at: "t", updated_at: "t",
 };
-const PROFILE = { name: "Aisha Khan", email: "aisha@b.co", dept: "Engineering", pos: "Engineer", basic: 100, allowances: 10, joinDate: "2024-03-15", role: "employee", status: "active" };
+const PROFILE = { name: "Aisha Khan", email: "aisha@b.co", dept: "Engineering", pos: "Engineer", basic: 100, allowances: 10, joinDate: "2024-03-15", role: "employee", status: "active", temporaryPassword: "temp-pass-1234" };
 
 // ---- inviteEmployee ------------------------------------------------------------------------------------------------
 
@@ -41,6 +40,22 @@ test("inviteEmployee POSTs /employees and resolves the created employee with its
   assert.equal(fake.calls[0].body.department_id, DEPT);
   assert.equal(employee.id, EMP);
   assert.equal(employee.email, "aisha@b.co");
+});
+
+test("inviteEmployee sends the temporary password (D41) and never returns it", async () => {
+  departmentDirectory.learn([{ id: DEPT, name: "Engineering" }]);
+  fake = installFakeFetch(() => created(EMPLOYEE_ROW));
+  const employee = await inviteEmployee(PROFILE);
+
+  assert.equal(fake.calls[0].body.temporary_password, "temp-pass-1234");
+  assert.equal(JSON.stringify(employee).includes("temp-pass"), false);
+});
+
+test("inviteEmployee: a failed create never echoes the temporary password back into the message", async () => {
+  departmentDirectory.learn([{ id: DEPT, name: "Engineering" }]);
+  fake = installFakeFetch(() => failure(400, "invalid_request", "temporary_password temp-pass-1234 is wrong"));
+
+  await assert.rejects(inviteEmployee(PROFILE), (error) => !/temp-pass-1234/.test(error.message));
 });
 
 test("inviteEmployee re-polls the data straight away: EmployeesPage calls it directly, so no hook would", async () => {
@@ -92,18 +107,63 @@ test("inviteEmployee for an unknown department is an invalid-argument error, not
   assert.equal(fake.calls.length, 0);
 });
 
-// ---- the password-setup step -------------------------------------------------------------------------------------
+// ---- resetting an existing employee's password (D41) -----------------------------------------------------------
 
-test("sendEmployeePasswordSetupEmail fails honestly: no email is sent, and no request is made", async () => {
-  fake = installFakeFetch(() => ok({}));
+test("resetEmployeePassword POSTs the new temporary password to the reset endpoint", async () => {
+  fake = installFakeFetch(() => noContent());
+  const result = await resetEmployeePassword(EMP, "temp-pass-1234");
 
-  await assert.rejects(sendEmployeePasswordSetupEmail("aisha@b.co"), (error) => error instanceof EmployeePasswordSetupError && error.code === "not-supported");
-  assert.equal(fake.calls.length, 0);
+  assert.equal(fake.calls[0].method, "POST");
+  assert.equal(fake.calls[0].path, `/employees/${EMP}/temporary-password`);
+  assert.deepEqual(fake.calls[0].body, { temporary_password: "temp-pass-1234" });
+  assert.equal(result, undefined);
 });
 
-test("sendEmployeePasswordSetupEmail still validates the address first", async () => {
-  await assert.rejects(sendEmployeePasswordSetupEmail("nope"), (error) => error.code === "invalid-email");
-  await assert.rejects(sendEmployeePasswordSetupEmail(undefined), (error) => error.code === "invalid-email");
+test("resetEmployeePassword: a password outside 8 to 200 characters is refused before any request", async () => {
+  fake = installFakeFetch(() => noContent());
+
+  for (const bad of ["", "short", "1234567", "x".repeat(201), undefined, null, 12345678]) {
+    await assert.rejects(resetEmployeePassword(EMP, bad), (error) => error instanceof EmployeeInvitationError && error.code === "invalid-argument", String(bad));
+  }
+  await resetEmployeePassword(EMP, "12345678");
+  await resetEmployeePassword(EMP, "x".repeat(200));
+  assert.equal(fake.calls.length, 2);
+});
+
+test("resetEmployeePassword: a refusal (hr on an admin, a self-reset, a manager) is a clear permission message, not 'internal'", async () => {
+  for (const serverCode of ["employee_scope_denied", "self_reset_denied", "role_not_allowed"]) {
+    fake = installFakeFetch(() => failure(403, serverCode, "server wording that must not show"));
+
+    await assert.rejects(resetEmployeePassword(EMP, "temp-pass-1234"), (error) => {
+      assert.ok(error instanceof EmployeeInvitationError);
+      assert.equal(error.code, "permission-denied");
+      assert.equal(error.message, "You do not have permission to reset this employee's password.");
+      return true;
+    }, serverCode);
+    fake.restore();
+  }
+  fake = null;
+});
+
+test("resetEmployeePassword: unknown employee, offline and server failures each have their own message", async () => {
+  for (const [response, code] of [[failure(404, "not_found"), "not-found"], [failure(503, "unavailable"), "unavailable"], [failure(500, "internal"), "internal"], [failure(401, "unauthenticated"), "unauthenticated"]]) {
+    fake = installFakeFetch(() => response);
+    await assert.rejects(resetEmployeePassword(EMP, "temp-pass-1234"), (error) => error instanceof EmployeeInvitationError && error.code === code);
+    fake.restore();
+  }
+  fake = null;
+});
+
+test("resetEmployeePassword never leaks the server's wording or the password", async () => {
+  fake = installFakeFetch(() => failure(500, "internal", "SQL exploded at line 9 for temp-pass-1234"));
+
+  await assert.rejects(resetEmployeePassword(EMP, "temp-pass-1234"), (error) => !/SQL|line 9|temp-pass/.test(error.message));
+});
+
+test("the token flow is gone from the invitation service", async () => {
+  const exported = Object.keys(await import("./employeeInvitationService.js"));
+
+  assert.equal(exported.includes("issueSetupLink"), false);
 });
 
 // ---- employee update / delete -------------------------------------------------------------------------------------

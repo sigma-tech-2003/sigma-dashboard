@@ -4,10 +4,14 @@ import { SessionError, sessionErrorFrom } from "../services/authApiService.js";
 // The session, as a small external store free of React so it runs under `node --test`. The AuthProvider is a
 // thin shell that subscribes to it with useSyncExternalStore.
 //
-//   state       { user, authReady }   `user` is the session user the app already uses; null when signed out
+//   state       { user, authReady, mustChangePassword }
+//               `user` is the session user the app already uses; null when signed out. `mustChangePassword` (D41) is the
+//               server's word that this account still has a temporary password: the app shows only the change-password
+//               screen until it is replaced (the server enforces it too; this only decides what to render).
 //   restore()   POST /auth/refresh (the httpOnly cookie) -> GET /auth/me -> the user              (D32)
 //   login()     authenticate() + establish(), the two steps LoginPage performs separately
 //   logout()    POST /auth/logout, and the token is forgotten whatever the server says
+//   changePassword()  POST /auth/change-password, which also clears `mustChangePassword`
 //
 // The role picker is NOT a security control (D37): authority comes from the role stored on the server. The
 // check only guards against signing in as the wrong persona, runs at login only, and a restore has no
@@ -16,7 +20,7 @@ import { SessionError, sessionErrorFrom } from "../services/authApiService.js";
 const isUnauthenticated = (error) => error?.name === "ApiError" && error.status === 401;
 
 export function createSessionManager({ authApi }) {
-  let state = { user: null, authReady: false };
+  let state = { user: null, authReady: false, mustChangePassword: false };
   const listeners = new Set();
   let signedInPrincipal = null; // set by authenticate(), consumed by establish()
   let restoring = null;
@@ -27,7 +31,7 @@ export function createSessionManager({ authApi }) {
   };
 
   // A refresh that proves the session is gone (cookie expired or revoked) signs the user out.
-  authApi.onAuthLost?.(() => setState({ user: null }));
+  authApi.onAuthLost?.(() => setState({ user: null, mustChangePassword: false }));
 
   const quietLogout = async () => {
     signedInPrincipal = null;
@@ -57,20 +61,21 @@ export function createSessionManager({ authApi }) {
 
   async function doRestore() {
     try {
+      let principal;
       try {
-        await authApi.restore();
+        principal = await authApi.restore();
       } catch (error) {
         if (isUnauthenticated(error)) {
-          setState({ user: null, authReady: true });
+          setState({ user: null, authReady: true, mustChangePassword: false });
           return null;
         }
         throw sessionErrorFrom(error);
       }
       const user = await loadUser();
-      setState({ user, authReady: true });
+      setState({ user, authReady: true, mustChangePassword: principal?.mustChangePassword === true });
       return user;
     } catch (error) {
-      setState({ user: null, authReady: true });
+      setState({ user: null, authReady: true, mustChangePassword: false });
       throw error;
     }
   }
@@ -107,9 +112,10 @@ export function createSessionManager({ authApi }) {
         await quietLogout();
         throw new SessionError("permission-denied");
       }
+      const mustChangePassword = signedInPrincipal?.mustChangePassword === true;
       signedInPrincipal = null;
       const user = await loadUser();
-      setState({ user, authReady: true });
+      setState({ user, authReady: true, mustChangePassword });
       return user;
     },
 
@@ -126,9 +132,20 @@ export function createSessionManager({ authApi }) {
       return user;
     },
 
+    /**
+     * D41: the owner replaces their own password. The server ends every other session and answers with a fresh
+     * one (already stored by the api layer), so the person carries on without signing in again. Errors are the
+     * raw ApiError for authService to translate.
+     */
+    async changePassword(currentPassword, newPassword) {
+      const principal = await authApi.changePassword(currentPassword, newPassword);
+      setState({ mustChangePassword: principal?.mustChangePassword === true });
+      return principal;
+    },
+
     async logout() {
       signedInPrincipal = null;
-      setState({ user: null });
+      setState({ user: null, mustChangePassword: false });
       return authApi.logout();
     },
   };

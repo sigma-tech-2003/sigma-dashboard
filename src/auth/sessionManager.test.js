@@ -9,7 +9,8 @@ const PROFILE = Object.freeze({
   role: "manager", department_id: "d1", department_name: "Engineering", position_title: "Lead",
   joined_on: "2024-03-15", team_lead_id: null, employment_status: "active",
 });
-const PRINCIPAL = Object.freeze({ userId: "u1", employeeId: "e1", role: "manager", departmentId: "d1", isTeamLead: false });
+const PRINCIPAL = Object.freeze({ userId: "u1", employeeId: "e1", role: "manager", departmentId: "d1", isTeamLead: false, mustChangePassword: false });
+const FLAGGED = Object.freeze({ ...PRINCIPAL, mustChangePassword: true });
 
 const apiError = (status, code = "x") => new ApiError({ status, code, message: "m" });
 
@@ -23,6 +24,7 @@ function fakeAuthApi(overrides = {}) {
     restore: record("restore", overrides.restore ?? (async () => PRINCIPAL)),
     me: record("me", overrides.me ?? (async () => PROFILE)),
     logout: record("logout", overrides.logout ?? (async () => undefined)),
+    changePassword: record("changePassword", overrides.changePassword ?? (async () => PRINCIPAL)),
   };
 }
 
@@ -230,18 +232,28 @@ test("end to end: StrictMode's two simultaneous restores make ONE refresh reques
   assert.equal(b.id, "e1");
 });
 
-test("end to end: setPassword is a public call and sends the token and password", async () => {
-  const { calls } = wiredSession(() => respond(204));
-  const authApi = createAuthApiService(createApiClient({
-    fetchImpl: async (url, init) => { calls.push({ url, body: init.body, auth: init.headers.Authorization }); return respond(204); },
-    withLock: (task) => task(),
-  }));
+test("end to end: changePassword is AUTHENTICATED, sends snake_case, and stores the fresh token the server returns", async () => {
+  const { api, calls, manager } = wiredSession((call) => {
+    if (call.url === "/auth/login") return respond(200, { data: { accessToken: "T1", expiresIn: 900, principal: FLAGGED } });
+    if (call.url === "/auth/me") return respond(200, { data: PROFILE });
+    if (call.url === "/auth/change-password") return respond(200, { data: { accessToken: "T2", expiresIn: 900, principal: PRINCIPAL } });
+    return respond(404, { error: { code: "not_found", message: "x" } });
+  });
+  await manager.login({ email: "a@b.co", password: "temp-pass-1", selectedRole: "manager" });
+  assert.equal(manager.getState().mustChangePassword, true);
 
-  await authApi.setPassword("tok", "a long password");
+  await manager.changePassword("temp-pass-1", "my-own-password");
 
-  assert.equal(calls[0].url, "/api/v1/auth/set-password");
-  assert.deepEqual(JSON.parse(calls[0].body), { token: "tok", password: "a long password" });
-  assert.equal(calls[0].auth, undefined);
+  const call = calls.find((c) => c.url === "/auth/change-password");
+  assert.equal(call.method, "POST");
+  assert.equal(call.auth, "Bearer T1", "the temporary session, not a public call");
+  assert.deepEqual(JSON.parse(call.body), { current_password: "temp-pass-1", new_password: "my-own-password" });
+  assert.equal(api.getAccessToken(), "T2", "every other session ended, so the fresh token must replace the old one");
+  assert.equal(manager.getState().mustChangePassword, false);
+});
+
+test("end to end: set-password no longer exists on the auth service", () => {
+  assert.equal("setPassword" in createAuthApiService(createApiClient({ fetchImpl: async () => respond(204), withLock: (task) => task() })), false);
 });
 
 // ---- the session as a store ------------------------------------------------------------------------------------
@@ -255,7 +267,7 @@ const watch = (manager) => {
 test("store: starts signed out and not ready", () => {
   const manager = createSessionManager({ authApi: fakeAuthApi() });
 
-  assert.deepEqual(manager.getState(), { user: null, authReady: false });
+  assert.deepEqual(manager.getState(), { user: null, authReady: false, mustChangePassword: false });
 });
 
 test("store: getState returns the same object until something changes (useSyncExternalStore needs that)", async () => {
@@ -282,7 +294,7 @@ test("store: restore with no session is ready and signed out", async () => {
   const manager = createSessionManager({ authApi: fakeAuthApi({ restore: async () => { throw apiError(401, "unauthenticated"); } }) });
   await manager.restore();
 
-  assert.deepEqual(manager.getState(), { user: null, authReady: true });
+  assert.deepEqual(manager.getState(), { user: null, authReady: true, mustChangePassword: false });
 });
 
 test("store: a restore that fails for a reason that says nothing about the session is still ready, and signed out", async () => {
@@ -290,7 +302,7 @@ test("store: a restore that fails for a reason that says nothing about the sessi
   const error = await rejection(manager.restore());
 
   assert.equal(error.code, "unavailable");
-  assert.deepEqual(manager.getState(), { user: null, authReady: true });
+  assert.deepEqual(manager.getState(), { user: null, authReady: true, mustChangePassword: false });
 });
 
 test("store: two simultaneous restores (StrictMode) share one run", async () => {
@@ -403,4 +415,118 @@ test("store: unsubscribe stops notifications", async () => {
   await manager.restore();
 
   assert.equal(count, 0);
+});
+
+// ---- D41: the temporary-password flag --------------------------------------------------------------------------
+
+test("D41: a restored session for a flagged account is flagged, so a reload cannot skip the forced screen", async () => {
+  const manager = createSessionManager({ authApi: fakeAuthApi({ restore: async () => FLAGGED }) });
+  await manager.restore();
+
+  assert.equal(manager.getState().mustChangePassword, true);
+  assert.ok(manager.getState().user, "the user is loaded (GET /auth/me is allowed), the app just shows the change screen");
+});
+
+test("D41: an ordinary account is not flagged, and a principal with no flag at all is not flagged either", async () => {
+  for (const principal of [PRINCIPAL, { ...PRINCIPAL, mustChangePassword: undefined }, { userId: "u1", employeeId: "e1", role: "manager" }]) {
+    const manager = createSessionManager({ authApi: fakeAuthApi({ restore: async () => principal }) });
+    await manager.restore();
+    assert.equal(manager.getState().mustChangePassword, false);
+  }
+});
+
+test("D41: only a literal true flags the session (a truthy string from a bad response does not)", async () => {
+  const manager = createSessionManager({ authApi: fakeAuthApi({ restore: async () => ({ ...PRINCIPAL, mustChangePassword: "true" }) }) });
+  await manager.restore();
+
+  assert.equal(manager.getState().mustChangePassword, false);
+});
+
+test("D41: signing in as a flagged account publishes the flag together with the user, in one state change", async () => {
+  const manager = createSessionManager({ authApi: fakeAuthApi({ login: async () => FLAGGED }) });
+  const seen = watch(manager);
+  await manager.authenticate("a@b.co", "temp");
+  assert.equal(manager.getState().mustChangePassword, false, "nothing is published before the role check");
+
+  await manager.establish("manager");
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].mustChangePassword, true);
+  assert.ok(seen[0].user);
+});
+
+test("D41: a role mismatch on a flagged account publishes nothing, flag included", async () => {
+  const manager = createSessionManager({ authApi: fakeAuthApi({ login: async () => FLAGGED }) });
+  const seen = watch(manager);
+  await manager.authenticate("a@b.co", "temp");
+
+  await rejection(manager.establish("admin"));
+
+  assert.equal(seen.length, 0);
+  assert.equal(manager.getState().mustChangePassword, false);
+});
+
+test("D41: a flag left by a previous sign-in does not survive the next sign-in", async () => {
+  let principal = FLAGGED;
+  const manager = createSessionManager({ authApi: fakeAuthApi({ login: async () => principal }) });
+  await manager.login({ email: "a@b.co", password: "temp", selectedRole: "manager" });
+  assert.equal(manager.getState().mustChangePassword, true);
+
+  principal = PRINCIPAL;
+  await manager.login({ email: "a@b.co", password: "mine", selectedRole: "manager" });
+
+  assert.equal(manager.getState().mustChangePassword, false);
+});
+
+test("D41: changePassword calls the API with both passwords and clears the flag, keeping the user", async () => {
+  const authApi = fakeAuthApi({ restore: async () => FLAGGED });
+  const manager = createSessionManager({ authApi });
+  await manager.restore();
+  const user = manager.getState().user;
+  const seen = watch(manager);
+
+  await manager.changePassword("temp-pass-1", "my-own-password");
+
+  assert.deepEqual(authApi.calls.at(-1), "changePassword");
+  assert.equal(manager.getState().mustChangePassword, false);
+  assert.equal(manager.getState().user, user, "the person stays signed in: no second sign-in is asked for");
+  assert.equal(seen.length, 1);
+});
+
+test("D41: a refused change (wrong current password) leaves the flag AND the session in place", async () => {
+  const refusal = new ApiError({ status: 403, code: "current_password_incorrect", message: "m" });
+  const manager = createSessionManager({ authApi: fakeAuthApi({ restore: async () => FLAGGED, changePassword: async () => { throw refusal; } }) });
+  await manager.restore();
+
+  const error = await rejection(manager.changePassword("wrong", "my-own-password"));
+
+  assert.equal(error, refusal, "the raw API error goes to authService, which words it");
+  assert.equal(manager.getState().mustChangePassword, true);
+  assert.ok(manager.getState().user);
+});
+
+test("D41: logout and a lost session both clear the flag", async () => {
+  let lost;
+  const authApi = { ...fakeAuthApi({ restore: async () => FLAGGED }), onAuthLost: (listener) => { lost = listener; return () => {}; } };
+  const manager = createSessionManager({ authApi });
+  await manager.restore();
+  assert.equal(manager.getState().mustChangePassword, true);
+  lost();
+  assert.equal(manager.getState().mustChangePassword, false);
+
+  await manager.restore();
+  assert.equal(manager.getState().mustChangePassword, true);
+  await manager.logout();
+  assert.equal(manager.getState().mustChangePassword, false);
+});
+
+test("D41: a restore that finds no session clears a flag from before", async () => {
+  let restoreResult = FLAGGED;
+  const manager = createSessionManager({ authApi: fakeAuthApi({ restore: async () => { if (restoreResult) return restoreResult; throw apiError(401, "unauthenticated"); } }) });
+  await manager.restore();
+  restoreResult = null;
+  await manager.restore();
+
+  assert.equal(manager.getState().mustChangePassword, false);
+  assert.equal(manager.getState().user, null);
 });

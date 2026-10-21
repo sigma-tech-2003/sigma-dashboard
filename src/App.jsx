@@ -21,6 +21,7 @@ import {
 import { useHashNavigation } from "./hooks/useHashNavigation";
 import { useScopedWorkspace } from "./hooks/useScopedWorkspace";
 import LoginPage from "./pages/login-page/LoginPage";
+import ChangePasswordPage from "./pages/change-password/ChangePasswordPage";
 
 const PAGE_COMPONENTS = Object.fromEntries(
   APP_ROUTES.map((route) => [route.id, lazy(route.load)]),
@@ -236,6 +237,7 @@ function AppContent() {
     user,
     authReady,
     seeding,
+    mustChangePassword,
     reportError,
     clearError,
     setLoading,
@@ -246,6 +248,9 @@ function AppContent() {
   if (seeding) return <LoadingScreen message="Setting up your database…" />;
   if (!authReady) return <LoadingScreen message="Connecting to Firebase…" />;
   if (!principal) return <LoginPage />;
+  // D41: a temporary password must be replaced before anything else. Nothing of the workspace mounts (so nothing
+  // polls and nothing is refused); the server enforces the same rule on every request.
+  if (mustChangePassword) return <ChangePasswordPage />;
 
   const workspaceIdentity = JSON.stringify({
     employeeId: principal.employee.id,

@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 import { session } from "../auth/session.js";
 import { failure, installFakeFetch, noContent, ok } from "../test-support/fakes.js";
-import { signIn, signOutUser } from "./authService.js";
+import { PasswordChangeError, changeOwnPassword, signIn, signOutUser } from "./authService.js";
 import { AuthSessionError, verifyAuthSession } from "./authSessionService.js";
 
 // LoginPage calls these in this order, unchanged from the Firebase version:
 //   signIn(email, pass)  ->  verifyAuthSession(selectedRole)  ->  (on failure) signOutUser()
 // and the app reads who is signed in from the shared session. These tests run that exact sequence.
 
-const PRINCIPAL = { userId: "u1", employeeId: "e1", role: "manager", departmentId: "d1", isTeamLead: false };
+const PRINCIPAL = { userId: "u1", employeeId: "e1", role: "manager", departmentId: "d1", isTeamLead: false, mustChangePassword: false };
 const PROFILE = {
   id: "e1", employee_number: "EMP-1", full_name: "Aisha Khan", email: "aisha@b.co", phone: null, role: "manager",
   department_id: "d1", department_name: "Engineering", position_title: "Lead", joined_on: "2024-03-15", team_lead_id: null, employment_status: "active",
@@ -128,4 +128,116 @@ test("signing out empties the department directory (it belongs to the person who
   await signOutUser();
 
   assert.deepEqual(departmentDirectory.lookup(), []);
+});
+
+// ---- changing your own password (D41) ----------------------------------------------------------------------------
+
+const TEMPORARY = "temp-pass-1234";
+const CHOSEN = "my-own-password";
+
+// Signs in as a flagged account first, because changing a password is something a signed-in person does.
+async function signInFlagged(extra = {}) {
+  fake = installFakeFetch(handler({
+    "/auth/login": () => ok({ accessToken: "T1", expiresIn: 900, principal: { ...PRINCIPAL, mustChangePassword: true } }),
+    "/auth/change-password": () => ok({ accessToken: "T2", expiresIn: 900, principal: PRINCIPAL }),
+    ...extra,
+  }));
+  await signIn("aisha@b.co", TEMPORARY);
+  await verifyAuthSession("manager");
+}
+
+const changeCalls = () => fake.calls.filter((call) => call.path === "/auth/change-password");
+
+test("changeOwnPassword POSTs both passwords, snake_case, with the signed-in token (it is NOT a public call)", async () => {
+  await signInFlagged();
+  await changeOwnPassword(TEMPORARY, CHOSEN);
+
+  assert.equal(changeCalls().length, 1);
+  assert.equal(changeCalls()[0].method, "POST");
+  assert.deepEqual(changeCalls()[0].body, { current_password: TEMPORARY, new_password: CHOSEN });
+  assert.equal(changeCalls()[0].headers.Authorization, "Bearer T1");
+});
+
+test("changeOwnPassword clears the flag and carries on with the fresh token, with no new sign-in", async () => {
+  await signInFlagged();
+  assert.equal(session.getState().mustChangePassword, true);
+
+  await changeOwnPassword(TEMPORARY, CHOSEN);
+
+  assert.equal(session.getState().mustChangePassword, false);
+  assert.ok(session.getState().user, "still signed in");
+  await session.refreshProfile();
+  assert.equal(fake.calls.at(-1).headers.Authorization, "Bearer T2", "the next request uses the token the change returned");
+});
+
+test("a new password that is too short or too long, or a missing current one, is refused before any request", async () => {
+  await signInFlagged();
+
+  for (const bad of ["", "short", "1234567", "x".repeat(201), undefined, null]) {
+    await assert.rejects(changeOwnPassword(TEMPORARY, bad), (error) => error instanceof PasswordChangeError && error.code === "invalid-password", String(bad));
+  }
+  for (const bad of ["", undefined, null]) {
+    await assert.rejects(changeOwnPassword(bad, CHOSEN), (error) => error instanceof PasswordChangeError && error.code === "missing-current", String(bad));
+  }
+  assert.equal(changeCalls().length, 0);
+});
+
+test("the length limits are the backend's: 8 and 200 are accepted", async () => {
+  await signInFlagged();
+  await changeOwnPassword(TEMPORARY, "12345678");
+  await changeOwnPassword(TEMPORARY, "x".repeat(200));
+
+  assert.equal(changeCalls().length, 2);
+});
+
+test("a wrong current password has its own message AND leaves you signed in and flagged (a 403, not a lost session)", async () => {
+  await signInFlagged({ "/auth/change-password": () => failure(403, "current_password_incorrect", "The current password is incorrect.") });
+
+  await assert.rejects(changeOwnPassword("not-it-at-all", CHOSEN), (error) => {
+    assert.ok(error instanceof PasswordChangeError);
+    assert.equal(error.code, "current-incorrect");
+    assert.equal(error.message, "The current password is incorrect.");
+    return true;
+  });
+  assert.ok(session.getState().user);
+  assert.equal(session.getState().mustChangePassword, true);
+  assert.equal(fake.calls.filter((call) => call.path === "/auth/refresh").length, 0, "a 403 must not trigger a session refresh");
+});
+
+test("choosing the temporary password again is its own message", async () => {
+  await signInFlagged({ "/auth/change-password": () => failure(400, "password_unchanged", "The new password must be different from the current one.") });
+
+  await assert.rejects(changeOwnPassword(TEMPORARY, TEMPORARY), (error) => error.code === "password-unchanged" && /different from the temporary one/.test(error.message));
+  assert.equal(session.getState().mustChangePassword, true);
+});
+
+test("a validation refusal from the server reads as the length message", async () => {
+  await signInFlagged({ "/auth/change-password": () => failure(400, "invalid_request", "A current password and a new password of 8 to 200 characters are required.") });
+
+  await assert.rejects(changeOwnPassword(TEMPORARY, CHOSEN), (error) => error.code === "invalid-password");
+});
+
+test("offline and server failures say so; anything else is generic and leaks nothing", async () => {
+  for (const [response, code] of [[failure(503, "unavailable"), "unavailable"], [failure(500, "internal", "SQL exploded"), "internal"], [failure(429, "too_many", "slow down"), "internal"]]) {
+    await signInFlagged({ "/auth/change-password": () => response });
+    await assert.rejects(changeOwnPassword(TEMPORARY, CHOSEN), (error) => error.code === code && !/SQL|slow down/.test(error.message));
+    fake.restore();
+    fake = installFakeFetch(handler());
+    await signOutUser();
+    fake.restore();
+    fake = null;
+  }
+});
+
+test("the old token flow is gone from authService: no redeem call, no old error class", async () => {
+  const exported = Object.keys(await import("./authService.js"));
+
+  assert.equal(exported.includes("setPasswordWithToken"), false);
+  assert.equal(exported.includes("EmployeePasswordSetupError"), false);
+});
+
+test("the email function is gone: nothing exports a way to 'send a setup email'", async () => {
+  const exported = Object.keys(await import("./authService.js"));
+
+  assert.equal(exported.includes("sendEmployeePasswordSetupEmail"), false);
 });

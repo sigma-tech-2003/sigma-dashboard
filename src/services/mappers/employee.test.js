@@ -150,3 +150,22 @@ test("toApiDelete sends the replacement team lead when there is one, and nothing
   assert.deepEqual(toApiDelete({}), {});
   assert.deepEqual(toApiDelete(), {});
 });
+
+// ---- D41: the temporary password ---------------------------------------------------------------------------------
+
+test("toApiCreate sends temporaryPassword as temporary_password, exactly as typed", () => {
+  assert.equal(toApiCreate({ name: "A", temporaryPassword: "  spaced pass  " }).temporary_password, "  spaced pass  ");
+  assert.equal(Object.hasOwn(toApiCreate({ name: "A" }), "temporary_password"), false, "absent when not given");
+});
+
+test("toApiUpdate has no password field: a carried temporaryPassword is dropped", () => {
+  const body = toApiUpdate({ name: "B", temporaryPassword: "temp-pass-1234" }, { original: { name: "A" } });
+
+  assert.deepEqual(body, { full_name: "B" });
+});
+
+test("fromApi never invents a password field on the record the pages hold", () => {
+  const record = fromApi(ROW);
+
+  assert.equal(Object.keys(record).some((key) => /pass/i.test(key)), false);
+});

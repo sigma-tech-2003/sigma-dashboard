@@ -1,6 +1,6 @@
 import { api as defaultApi } from "./apiClient.js";
 
-// The auth endpoints (D32, D34, D37), over the one API client. This replaces authService.js and
+// The auth endpoints (D32, D37, D41), over the one API client. This replaces authService.js and
 // authSessionService.js at cutover; both stay in place, untouched, until then.
 
 /**
@@ -64,8 +64,16 @@ export function createAuthApiService(api = defaultApi) {
       }
     },
 
-    /** POST /auth/set-password (D34): redeem a single-use token. Public; the person has no session yet. */
-    setPassword: (token, password) => api.post("/auth/set-password", { token, password }, { auth: false }),
+    /**
+     * POST /auth/change-password (D41): the owner replaces their own password. Authenticated, and the only call a
+     * flagged account may make besides /auth/me. Every other session is ended by the server, so the response carries
+     * a fresh access token (and the refresh cookie) exactly like login; it is stored here -> the new principal.
+     */
+    async changePassword(currentPassword, newPassword) {
+      const data = await api.post("/auth/change-password", { current_password: currentPassword, new_password: newPassword });
+      api.setAccessToken(data.accessToken);
+      return data.principal;
+    },
 
     onAuthLost: (listener) => api.onAuthLost(listener),
   });

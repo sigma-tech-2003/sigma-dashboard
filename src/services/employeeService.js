@@ -25,13 +25,11 @@ export function createEmployeeService(api = defaultApi) {
     remove: (id, { replacementTeamLeadId } = {}) => base.remove(id, mapper.toApiDelete({ replacementTeamLeadId })),
 
     /**
-     * POST /employees/:id/password-token (D34): a single-use link token for the new employee, issued by admin
-     * or hr, who then pass the link on. There is no email (D25).
+     * POST /employees/:id/temporary-password (D41): admin or hr give an existing employee a new temporary password.
+     * The employee must replace it at next sign-in and their current sessions end. Resolves with nothing (204).
      */
-    async issuePasswordSetupLink(id) {
-      const { token, expiresAt } = await api.post(`/employees/${id}/password-token`);
-      // Only the token: the set-password route that turns it into a link does not exist yet (page work, D34).
-      return { token, expiresAt };
+    async setTemporaryPassword(id, temporaryPassword) {
+      await api.post(`/employees/${id}/temporary-password`, { temporary_password: temporaryPassword });
     },
   };
 }

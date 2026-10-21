@@ -58,11 +58,13 @@ function departmentField(record, { departments } = {}) {
 /**
  * A page's new-employee payload -> POST /employees. `status` becomes employment_status and is sent only when
  * it is "active" or "inactive" (D35); the API rejects anything else on create. `id`, `empId` and the timestamps
- * are never sent: the server assigns them.
+ * are never sent: the server assigns them. `temporaryPassword` (D41) is sent as typed, never trimmed, and ONLY on
+ * create: toApiUpdate has no password field, and the API's update schema refuses one.
  */
 export function toApiCreate(record, context = {}) {
   const body = { ...pickMapped(record, SCALAR_FIELDS), ...departmentField(record, context) };
   if (hasOwn(record, "status")) body.employment_status = record.status;
+  if (hasOwn(record, "temporaryPassword")) body.temporary_password = record.temporaryPassword;
   return body;
 }
 

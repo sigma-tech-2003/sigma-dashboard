@@ -139,12 +139,34 @@ test("remove without a replacement sends an empty body", async () => {
   assert.deepEqual(api.calls[0].body, {});
 });
 
-test("issuePasswordSetupLink POSTs the token endpoint and returns the token and expiry", async () => {
-  const api = fakeApi(() => ({ token: "tok", expiresAt: "2026-10-10T00:00:00Z" }));
-  const result = await createEmployeeService(api).issuePasswordSetupLink(EMP);
+test("setTemporaryPassword POSTs the new temporary password to the reset endpoint and resolves with nothing", async () => {
+  const api = fakeApi(() => undefined);
+  const result = await createEmployeeService(api).setTemporaryPassword(EMP, "temp-pass-1234");
 
-  assert.equal(api.calls[0].path, `/employees/${EMP}/password-token`);
-  assert.deepEqual(result, { token: "tok", expiresAt: "2026-10-10T00:00:00Z" });
+  assert.equal(api.calls[0].method, "POST");
+  assert.equal(api.calls[0].path, `/employees/${EMP}/temporary-password`);
+  assert.deepEqual(api.calls[0].body, { temporary_password: "temp-pass-1234" });
+  assert.equal(result, undefined);
+});
+
+test("create sends the temporary password as typed (never trimmed), and the response carries no password", async () => {
+  departmentDirectory.learn([{ id: DEPT, name: "Engineering" }]);
+  const api = fakeApi(() => EMPLOYEE_ROW);
+  const created = await createEmployeeService(api).create({
+    name: "Aisha Khan", email: "a@b.co", dept: "Engineering", pos: "Engineer", basic: 100, allowances: 10,
+    joinDate: "2024-03-15", role: "employee", status: "active", temporaryPassword: "  spaced pass  ",
+  });
+
+  assert.equal(api.calls[0].body.temporary_password, "  spaced pass  ");
+  assert.equal(JSON.stringify(created).includes("spaced"), false);
+});
+
+test("update never sends a password, even if the edited record carries one", async () => {
+  const api = fakeApi(() => EMPLOYEE_ROW);
+  await createEmployeeService(api).update(EMP, { pos: "Lead", temporaryPassword: "temp-pass-1234" }, { original: { pos: "Engineer" } });
+
+  assert.equal(Object.hasOwn(api.calls[0].body, "temporary_password"), false);
+  assert.equal(JSON.stringify(api.calls[0].body).includes("temp-pass"), false);
 });
 
 // ---- departments, projects -----------------------------------------------------------------------------------------
