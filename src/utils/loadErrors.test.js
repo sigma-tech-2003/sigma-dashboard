@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ApiError } from "../services/apiClient.js";
-import { describeLoadError, evaluateLoadErrors, joinLabels } from "./loadErrors.js";
+import { describeLoadError, evaluateLoadErrors, isDeliberateDenial, joinLabels, loadErrorUnlessDenied } from "./loadErrors.js";
 
 const apiError = (status, code, message) => new ApiError({ status, code, message });
 const NETWORK = apiError(0, "network", "Unable to connect. Check your connection and try again.");
@@ -118,3 +118,38 @@ test("stale entries say whether they still have data: out of date versus never l
   assert.equal(result.stale.find((item) => item.name === "payroll").hasData, true);
   assert.equal(result.stale.find((item) => item.name === "departments").hasData, false);
 });
+
+// ---- a deliberate refusal is not a failed load ---------------------------------------------------------------------
+
+test("only an ApiError with status 403 is a deliberate denial", () => {
+  assert.equal(isDeliberateDenial(apiError(403, "role_not_allowed", "no")), true);
+  for (const other of [apiError(401, "unauthenticated", "x"), apiError(404, "not_found", "x"), apiError(409, "conflict", "x"), apiError(500, "internal", "x"), OUTAGE, NETWORK]) {
+    assert.equal(isDeliberateDenial(other), false, String(other.status));
+  }
+  assert.equal(isDeliberateDenial(new Error("boom")), false);
+  assert.equal(isDeliberateDenial({ name: "ApiError" }), false);
+  for (const nothing of [null, undefined]) assert.equal(isDeliberateDenial(nothing), false);
+});
+
+test("loadErrorUnlessDenied hides a 403 and passes every real failure through untouched", () => {
+  assert.equal(loadErrorUnlessDenied(apiError(403, "role_not_allowed", "no")), null);
+  for (const real of [OUTAGE, NETWORK, apiError(500, "internal", "x"), apiError(401, "unauthenticated", "x")]) {
+    assert.equal(loadErrorUnlessDenied(real), real);
+  }
+  assert.equal(loadErrorUnlessDenied(null), null);
+  assert.equal(loadErrorUnlessDenied(undefined), undefined);
+});
+
+test("with the denial removed, a departments 403 reads as ok, while a departments outage still shows as stale", () => {
+  const denied = loadErrorUnlessDenied(apiError(403, "role_not_allowed", "no"));
+  assert.equal(evaluateLoadErrors({ errors: { departments: denied }, optional: { departments: [] } }).status, "ok");
+  const outage = loadErrorUnlessDenied(OUTAGE);
+  assert.equal(evaluateLoadErrors({ errors: { departments: outage }, optional: { departments: [] } }).status, "stale");
+});
+
+test("a 403 on a collection the page requires is NOT silenced by the helper being available", () => {
+  const refusal = apiError(403, "role_not_allowed", "You do not have access.");
+  // The hook for departments is the only caller. Anything else keeps its error, so a real denial of required data blocks.
+  assert.equal(evaluateLoadErrors({ errors: { employees: refusal }, required: { employees: [] } }).status, "blocked");
+});
+

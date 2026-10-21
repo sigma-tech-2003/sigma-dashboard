@@ -75,3 +75,17 @@ export function evaluateLoadErrors({ errors = {}, required = {}, optional = {} }
   const messages = [...new Set([...blocking, ...stale].map((item) => item.message))];
   return { status, blocking, stale, messages };
 }
+
+/**
+ * A 403 is the API saying "this role may not read this list". That is an answer, not a failure: a page must not report
+ * it as "could not be loaded". Only used for lists a role is not meant to have (the departments list for anyone but
+ * admin and hr); for every other collection a 403 is still a real problem and keeps showing.
+ */
+export function isDeliberateDenial(error) {
+  return error?.name === "ApiError" && error.status === 403;
+}
+
+/** The load error to report, or null when the "error" was a deliberate denial. */
+export function loadErrorUnlessDenied(error) {
+  return isDeliberateDenial(error) ? null : error;
+}
