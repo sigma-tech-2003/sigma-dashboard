@@ -4,6 +4,7 @@ import { legacyCodeFor } from "./mutationErrors.js";
 const ERROR_MESSAGES = Object.freeze({
   unauthenticated: "Your session has expired. Please sign in and try again.",
   "permission-denied": "You do not have permission to manage this employee.",
+  "self-edit-denied": "You can only change your own phone number. Ask HR or an administrator to change anything else on your record.",
   "invalid-argument": "Review the employee details and try again.",
   "not-found": "This employee record could not be found.",
   "already-exists": "This employee email is already in use.",
@@ -30,7 +31,12 @@ export class EmployeeMutationError extends Error {
   }
 }
 
-const failure = (error) => (error instanceof EmployeeMutationError ? error : new EmployeeMutationError(legacyCodeFor(error)));
+const failure = (error) => {
+  if (error instanceof EmployeeMutationError) return error;
+  // D43: refusing a self-edit has its own message; the generic "no permission" would not tell the person what they CAN do.
+  if (error?.name === "ApiError" && error.code === "self_edit_field_denied") return new EmployeeMutationError("self-edit-denied");
+  return new EmployeeMutationError(legacyCodeFor(error));
+};
 
 const requiredId = (value) => {
   const id = typeof value === "string" ? value.trim() : "";

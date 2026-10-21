@@ -74,11 +74,84 @@ test("SELF_ROLE_CHANGE_DENIED: no role may change their own role", () => {
   }
 });
 
-test("editing your own non-role fields is still allowed", () => {
-  // The self-role gate must not accidentally lock someone out of their own profile.
-  const principal = principalFor("employee");
+test("editing your own phone number is still allowed, for every role", () => {
+  // The self-role gate must not accidentally lock someone out of their own contact details.
+  for (const role of USER_ROLES) {
+    const self = employee({ id: SELF, role, phone: "0300" });
+    assert.doesNotThrow(() => assertCanUpdateEmployee(principalFor(role), self, { phone: "0311-1112223" }), role);
+  }
+});
+
+// D43: everything on your own record except contact details is controlled by HR and the management chain.
+const SELF_FIELD_CHANGES = Object.freeze({
+  position_title: "Self-promoted",
+  full_name: "Someone Else",
+  email: "changed@example.com",
+  joined_on: "2020-01-01",
+  department_id: "dept-2",
+  team_lead_id: "someone-else",
+  employment_status: "inactive",
+  basic: 999999,
+  allowances: 12345,
+});
+
+test("D43: nobody but an admin may change anything but their phone on their own record", () => {
+  for (const role of USER_ROLES.filter((r) => r !== "admin")) {
+    const self = employee({
+      id: SELF, role, phone: "0300", position_title: "Engineer", full_name: "Me", email: "me@example.com", joined_on: "2024-01-01",
+      employment_status: "active",
+    });
+    for (const [field, value] of Object.entries(SELF_FIELD_CHANGES)) {
+      assert.equal(
+        codeOf(() => assertCanUpdateEmployee(principalFor(role), self, { [field]: value })),
+        "self_edit_field_denied",
+        `${role} changing their own ${field}`,
+      );
+    }
+  }
+});
+
+test("D43: one forbidden field in an otherwise allowed edit refuses the whole edit", () => {
+  const self = employee({ id: SELF, role: "employee", phone: "0300" });
+
+  assert.equal(codeOf(() => assertCanUpdateEmployee(principalFor("employee"), self, { phone: "0311", position_title: "CEO" })), "self_edit_field_denied");
+});
+
+test("D43: hr cannot raise their own salary, though hr may change anyone else's", () => {
+  const self = employee({ id: SELF, role: "hr", basic: 100000 });
+
+  assert.equal(codeOf(() => assertCanUpdateEmployee(principalFor("hr"), self, { basic: 200000 })), "self_edit_field_denied");
+  assert.equal(codeOf(() => assertCanUpdateEmployee(principalFor("hr"), employee({ role: "employee", basic: 100000 }), { basic: 200000 })), null);
+});
+
+test("D43: an admin may still edit every field of their own record except the role", () => {
+  const self = employee({ id: SELF, role: "admin", basic: 1 });
+  for (const [field, value] of Object.entries(SELF_FIELD_CHANGES)) {
+    assert.equal(codeOf(() => assertCanUpdateEmployee(principalFor("admin"), self, { [field]: value })), null, `admin changing their own ${field}`);
+  }
+  assert.equal(codeOf(() => assertCanUpdateEmployee(principalFor("admin"), self, { role: "hr" })), "self_role_change_denied");
+});
+
+test("D43: sending a field back UNCHANGED is not a change (a client may echo the whole record)", () => {
+  const self = employee({ id: SELF, role: "employee", basic: "50000.00", allowances: 0, phone: "0300", position_title: "Engineer", team_lead_id: null });
+
+  assert.doesNotThrow(() => assertCanUpdateEmployee(principalFor("employee"), self, {
+    phone: "0311", position_title: "Engineer", basic: 50000, allowances: 0, team_lead_id: null,
+  }));
+});
+
+test("D43: a role change on your own record is still reported as self_role_change_denied, not the field rule", () => {
   const self = employee({ id: SELF, role: "employee" });
-  assert.doesNotThrow(() => assertCanUpdateEmployee(principal, self, { phone: "0300" }));
+
+  assert.equal(codeOf(() => assertCanUpdateEmployee(principalFor("employee"), self, { role: "manager" })), "self_role_change_denied");
+});
+
+test("D43: the rule only applies to your OWN record; managing others is exactly as before", () => {
+  const target = employee({ role: "employee", position_title: "Engineer" });
+
+  assert.equal(codeOf(() => assertCanUpdateEmployee(principalFor("manager"), target, { position_title: "Senior Engineer" })), null);
+  assert.equal(codeOf(() => assertCanUpdateEmployee(principalFor("hr"), target, { employment_status: "inactive", basic: 1 })), null);
+  assert.equal(codeOf(() => assertCanUpdateEmployee(principalFor("tl"), employee({ role: "employee", team_lead_id: SELF }), { position_title: "x" })), null);
 });
 
 test("PAYROLL_ROLES: only admin and hr may change basic or allowances", () => {

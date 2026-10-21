@@ -45,6 +45,17 @@ const PASSWORD_RESETTERS = new Set(["admin", "hr"]);
 
 const denied = (code, message) => new HttpError(403, code, message);
 
+/** D43: the only fields anyone but an admin may change on their own record. */
+export const SELF_EDITABLE_FIELDS = Object.freeze(new Set(["phone"]));
+
+/** True when `changes[field]` is the value the stored row already has (numbers compared as numbers). */
+function unchanged(changes, target, field) {
+  const next = changes[field];
+  const current = target?.[field];
+  if ((next ?? null) === (current ?? null)) return true;
+  return typeof next === "number" && typeof current !== "object" && Number(next) === Number(current);
+}
+
 function assertActingRoleKnown(principal) {
   if (!principal?.role || !ROLE_ASSIGNMENTS[principal.role]) {
     throw denied("role_not_allowed", "This account cannot manage employees.");
@@ -126,9 +137,23 @@ export function assertCanUpdateEmployee(principal, target, changes = {}) {
     throw denied("self_role_change_denied", "You cannot change your own role.");
   }
 
-  // Editing your own non-role fields is allowed; the scope check below would otherwise
-  // deny a manager editing their own phone number.
   const editingSelf = principal.employeeId === target.id;
+
+  // D43: your own record is yours to edit only as far as contact details go. Everything else on it (position, join
+  // date, email -- the sign-in identity --, department, team lead, employment status, compensation) is what HR and
+  // the management chain control, and letting someone set it on themselves would let an employee deactivate or
+  // promote themselves, detach from their team lead, or change their own salary. An admin is the exception, because
+  // an admin may change all of it on anyone else. Values sent unchanged are ignored, so a client that echoes the
+  // whole record back is not refused for it.
+  if (editingSelf && principal.role !== "admin") {
+    const forbidden = Object.keys(changes).filter((field) => !SELF_EDITABLE_FIELDS.has(field) && !unchanged(changes, target, field));
+    if (forbidden.length > 0) {
+      throw denied(
+        "self_edit_field_denied",
+        "You can only change your own phone number here. Ask HR or an administrator to change anything else on your record.",
+      );
+    }
+  }
 
   if (!editingSelf) {
     const assignable = ROLE_ASSIGNMENTS[principal.role];

@@ -252,6 +252,38 @@ async function run(pool, tag) {
     }
 
     // ======================================================================
+    // D43: your own record -- contact details only (an admin is the exception)
+    // ======================================================================
+    const readRow = async (employeeId) => (await pool.query(
+      "SELECT phone, position_title, employment_status, team_lead_id, basic, (SELECT email FROM users WHERE id = employees.user_id) AS email FROM employees WHERE id = $1",
+      [employeeId])).rows[0];
+    const selfPatch = (who, token, body) => call("PATCH", `/employees/${who.employeeId}`, { token, body });
+    const employeeBefore = await readRow(employee.employeeId);
+    check("D43: an employee changes their OWN phone number -> 200",
+      (await selfPatch(employee, tokenOf("employee"), { phone: "0300-0000001" })).status === 200, "");
+    for (const [field, value] of [["position_title", "Self-promoted"], ["email", "changed@example.invalid"], ["employment_status", "inactive"],
+      ["team_lead_id", null], ["basic", 999999], ["allowances", 1], ["joined_on", "2019-01-01"], ["full_name", "Someone Else"]]) {
+      const refused = await selfPatch(employee, tokenOf("employee"), { [field]: value });
+      check(`D43: an employee changing their own ${field} -> 403 self_edit_field_denied`, errorOf(refused) === "403 self_edit_field_denied", errorOf(refused));
+    }
+    const employeeAfter = await readRow(employee.employeeId);
+    check("D43: ...and none of those refused edits reached the database (only the phone changed)",
+      employeeAfter.phone === "0300-0000001" && employeeAfter.position_title === employeeBefore.position_title
+      && employeeAfter.employment_status === employeeBefore.employment_status && employeeAfter.team_lead_id === employeeBefore.team_lead_id
+      && Number(employeeAfter.basic) === Number(employeeBefore.basic) && employeeAfter.email === employeeBefore.email, showing({ employeeBefore, employeeAfter }));
+    check("D43: sending a field back unchanged is not a change -> 200",
+      (await selfPatch(employee, tokenOf("employee"), { phone: "0300-0000002", position_title: employeeBefore.position_title, employment_status: employeeBefore.employment_status })).status === 200, "");
+    check("D43: a manager changing their own position -> 403; a tl -> 403",
+      errorOf(await selfPatch(manager, tokenOf("manager"), { position_title: "Director" })) === "403 self_edit_field_denied"
+      && errorOf(await selfPatch(tl, tokenOf("tl"), { position_title: "Director" })) === "403 self_edit_field_denied", "");
+    check("D43: hr cannot raise their OWN salary -> 403 (though hr may change a manager's)",
+      errorOf(await selfPatch(hr, tokenOf("hr"), { basic: 5000000 })) === "403 self_edit_field_denied"
+      && (await call("PATCH", `/employees/${manager.employeeId}`, { token: tokenOf("hr"), body: { basic: 61000 } })).status === 200, "");
+    check("D43: an admin may still edit their own position -> 200, but not their own role -> 403 self_role_change_denied",
+      (await selfPatch(admin, tokenOf("admin"), { position_title: "Chief Administrator" })).status === 200
+      && errorOf(await selfPatch(admin, tokenOf("admin"), { role: "hr" })) === "403 self_role_change_denied", "");
+
+    // ======================================================================
     // D35 and D41: creating an employee with a TEMPORARY password
     // ======================================================================
     const TEMP = "temp-pass-1234";

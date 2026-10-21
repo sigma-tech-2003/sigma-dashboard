@@ -166,6 +166,26 @@ test("the token flow is gone from the invitation service", async () => {
   assert.equal(exported.includes("issueSetupLink"), false);
 });
 
+// ---- D43: editing your own record --------------------------------------------------------------------------------------
+
+test("updateEmployee: a refused self-edit says what the person CAN change, not just 'no permission'", async () => {
+  fake = installFakeFetch(() => failure(403, "self_edit_field_denied", "server wording that must not show"));
+
+  await assert.rejects(updateEmployee(EMP, { pos: "CEO" }), (error) => {
+    assert.ok(error instanceof EmployeeMutationError);
+    assert.equal(error.code, "self-edit-denied");
+    assert.match(error.message, /only change your own phone number/);
+    assert.doesNotMatch(error.message, /server wording/);
+    return true;
+  });
+});
+
+test("updateEmployee: any other 403 is still the generic permission message", async () => {
+  fake = installFakeFetch(() => failure(403, "employee_scope_denied"));
+
+  await assert.rejects(updateEmployee(EMP, { pos: "x" }), (error) => error.code === "permission-denied" && /do not have permission/.test(error.message));
+});
+
 // ---- employee update / delete -------------------------------------------------------------------------------------
 
 test("updateEmployee PATCHes only what changed against the original", async () => {

@@ -301,6 +301,58 @@ test("PATCH /employees/:id: nobody may change their own role, not even admin -- 
   }
 });
 
+test("PATCH /employees/:id: D43 -- an employee may change their own phone (200) and nothing else on their own record (403)", async () => {
+  const self = employee({ id: SELF, role: "employee", phone: "0300", position_title: "Engineer", employment_status: "active", team_lead_id: randomUUID() });
+  const repository = fakeEmployeeRepository([self]);
+  const app = await startApp(principalFor("employee"), repository);
+  try {
+    const allowed = await app.request("PATCH", `/api/v1/employees/${SELF}`, { phone: "0311-1112223" });
+    assert.equal(allowed.status, 200);
+    assert.deepEqual(repository.calls.updateById.at(-1).changes, { phone: "0311-1112223" });
+
+    for (const body of [
+      { position_title: "CEO" }, { email: "new@example.com" }, { employment_status: "inactive" }, { team_lead_id: null },
+      { joined_on: "2019-01-01" }, { department_id: OTHER_DEPARTMENT }, { basic: 999999 }, { allowances: 1 }, { full_name: "Other Name" },
+    ]) {
+      const before = repository.calls.updateById.length;
+      const refused = await app.request("PATCH", `/api/v1/employees/${SELF}`, body);
+
+      assert.equal(refused.status, 403, JSON.stringify(body));
+      assert.equal(refused.body.error.code, "self_edit_field_denied", JSON.stringify(body));
+      assert.equal(repository.calls.updateById.length, before, `nothing was written for ${JSON.stringify(body)}`);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("PATCH /employees/:id: D43 -- manager, tl and hr are held to the same rule on their own record; admin is not", async () => {
+  for (const role of ["manager", "tl", "hr"]) {
+    const self = employee({ id: SELF, role, position_title: "Lead", basic: 1000 });
+    const repository = fakeEmployeeRepository([self]);
+    const app = await startApp(principalFor(role), repository);
+    try {
+      const refused = await app.request("PATCH", `/api/v1/employees/${SELF}`, { position_title: "Director" });
+      assert.equal(refused.status, 403, role);
+      assert.equal(refused.body.error.code, "self_edit_field_denied", role);
+      assert.equal(repository.calls.updateById.length, 0, role);
+    } finally {
+      await app.close();
+    }
+  }
+
+  const self = employee({ id: SELF, role: "admin", position_title: "Admin" });
+  const repository = fakeEmployeeRepository([self]);
+  const app = await startApp(principalFor("admin"), repository);
+  try {
+    const allowed = await app.request("PATCH", `/api/v1/employees/${SELF}`, { position_title: "Chief Admin" });
+    assert.equal(allowed.status, 200);
+    assert.equal(repository.calls.updateById.length, 1);
+  } finally {
+    await app.close();
+  }
+});
+
 test("PATCH /employees/:id: a manager changing compensation is denied -- PAYROLL_ROLES only", async () => {
   const target = employee();
   const app = await startApp(principalFor("manager"), fakeEmployeeRepository([target]));
