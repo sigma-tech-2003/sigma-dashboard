@@ -462,7 +462,8 @@ listed below):
    the directory.
 2. **Auth.** Replace `authService.js` (sign-in, sign-out, the auth-state listener, the
    password-setup email) and `authSessionService.js` (`verifyAuthSession`) with calls to
-   `POST /auth/login`, `/auth/refresh`, `/auth/logout` and `/auth/set-password`; replace
+   `POST /auth/login`, `/auth/refresh`, `/auth/logout` and `/auth/set-password` (superseded 2026-10-10: D41 replaces
+   it with `/auth/change-password`); replace
    `useAuthSession.js`'s `onAuthStateChanged` with a restore-on-boot against the refresh
    cookie. Add whatever the session needs that the API does not yet return, and a
    set-password route in the app, which does not exist.
@@ -555,6 +556,14 @@ is in one place.)*
   check: `GET /auth/me` (D32); `department_name` on employee reads, project reads and `/auth/me` (D33); an
   optional `employment_status` on `POST /employees` (D35); and the employee `basic` and `allowances` returned
   as numbers (D38). **D34, D36, D37 and D39 need no backend change.**
+- **Amended 2026-10-10 ([D41](schema-design.md#d41--temporary-passwords-and-a-forced-first-change--settled),
+  [D42](schema-design.md#d42--creating-a-department-from-the-add-employee-form--settled)).** The D34 items below — the set-password route, the link-issuing UI and
+  the notice for managers and tls — are **replaced**: whoever creates an employee sets a temporary password, and
+  the employee is forced to change it at first sign-in. That adds migrations `012_temporary_passwords` and
+  `013_drop_password_set_tokens` (the token table is dropped), `POST /auth/change-password`,
+  `POST /employees/:id/temporary-password`, a `mustChangePassword` flag on the principal, a server-side gate on
+  every route but two while it is set, and a Change password screen, a Temporary password field and a Reset
+  password action in the frontend. The Add Employee form also gets "+ Create department" for an admin (D42).
 - **Frontend:**
   - Production reaches the API through a `vercel.json` rewrite, with a relative base URL (`/api/v1`) and a
     Vite dev proxy to match (D36).

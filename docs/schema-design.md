@@ -1343,6 +1343,14 @@ narrow exception made for exactly one flow, for exactly this reason.
 > receive a token. This decision stands unchanged; how the frontend should handle it is open as
 > [D34](#d34--delivering-the-password-setup-link-builds-on-d25).
 
+> **Superseded 2026-10-10 by [D41](#d41--temporary-passwords-and-a-forced-first-change--settled).** The token table (`006_password_set_tokens`), the
+> redemption endpoint and the issuing endpoint described above are replaced by a temporary password that
+> whoever creates the employee sets at creation and the employee must change at first sign-in. The text above
+> is kept as the record of why the token existed and why it was called interim. One of its reasons no longer
+> holds: "issuance is admin/hr only" was a deliberate narrowing of who can mint a working credential, and D41
+> reverses it on purpose for creation (see D41, point 1). D41 also drops the table, in migration `013`;
+> migration `006` itself is untouched.
+
 ### D26 — Deleting a department that still has employees in it — ✅ SETTLED
 
 `employees.department_id` is `NOT NULL`, so a department cannot be deleted out from under its
@@ -2195,6 +2203,15 @@ Consequences — recorded, **not built**:
 - **Still open, unchanged:** a self-service "forgot password". The backend has no endpoint for it and the
   login page has no such flow; it is a separate gap, not decided here.
 
+> **Superseded 2026-10-10 by [D41](#d41--temporary-passwords-and-a-forced-first-change--settled).** Option A as decided here (a single-use link, issued by
+> admin or hr, redeemed on a set-password route) is replaced: whoever creates an employee sets a temporary
+> password at creation and the employee must change it at first sign-in. The set-password page, route and
+> link-issuing UI built for A were removed, along with `POST /auth/set-password` and
+> `POST /employees/:id/password-token`. The "workflow cost" recorded above — a manager- or tl-created
+> employee cannot be activated until an admin or hr issues a link — no longer exists. Option C, which this
+> entry rejected, is in effect adopted for creation; D41 records that reversal and what compensates for it.
+> The self-service "forgot password" gap stays open. [D35](#d35--employee-status-on-create) is unaffected.
+
 ### D35 — Employee status on create
 
 **✅ SETTLED 2026-10-09 — A: `POST /employees` accepts an optional `employment_status` of `active` or
@@ -2742,3 +2759,152 @@ has been done. What was changed, and what it settled:
   remaining affected tests rewritten, and "no limits" regression tests were added. The end-to-end script went from 161 to 139 results and passed against `sigma_hrm_scratch`, again after
   rolling `011` back and re-applying it; with the per-employee lock removed it fails exactly the two
   race proofs that depend on it.
+
+### D41 — Temporary passwords and a forced first change — ✅ SETTLED
+
+**✅ SETTLED 2026-10-10 — the set-password token flow is replaced by a temporary password set by the
+creator and a forced change at first sign-in.** Supersedes
+[D25](#d25--set-password-token-delivery-for-invited-employees--settled-interim) and
+[D34](#d34--delivering-the-password-setup-link-builds-on-d25); their text is untouched and each carries a
+pointer here. Built and tested, uncommitted.
+
+**What was asked, and why.** D25 and D34 chose a token and a link because there is no email transport. In
+daily use that is too long-winded: admin, hr, manager and tl all just want to hand someone a password. So
+whoever creates an employee sets a temporary password at creation, and the employee is forced to change it
+the first time they sign in; the creator's password stops working the moment it is replaced. **The reason for
+the forced change is the substance of the decision, and is recorded as given: without it, the creator
+permanently knows that employee's password, and nothing done under that account could be attributed to the
+employee rather than to whoever created it. In a system holding payroll that is not acceptable. The forced
+change closes that.**
+
+**What contradicted the request, found while working out the shape — reported, not worked around:**
+1. **It reverses a rule D25 and D34 set on purpose.** Both kept the power to mint a working credential with
+   admin and hr, and D34 rejected "let managers and tls issue links" (its option C) as handing that power to
+   more people. Setting a password at creation does exactly that for a **manager** (who creates tls and
+   employees in their own department) and a **tl** (who creates employees). The project owner chose it knowing
+   this. What makes it tolerable is the forced change plus the audit column below, and the bound it already
+   has: nobody can set a password for anyone they cannot create. **Resetting an existing employee's password
+   stays admin and hr only.**
+2. **The forced change narrows the window; it does not close it.** A creator who signs in before the employee
+   can complete the change themselves and from then on be the only person who knows the password. What the
+   design does guarantee: the creator's password stops working the moment it is replaced; if the creator got
+   there first, the real employee is locked out on their first attempt, which is visible; and
+   `users.password_set_by_employee_id` records who set the temporary password and **is kept after the employee
+   changes it**, so the window is attributable. What it does not do: stop a creator signing in during the
+   window, or record who completed the change (there is no sign-in audit log, only `last_login_at`).
+3. **A redirect enforces nothing.** If only the browser made the employee change the password, anyone holding
+   the temporary password and calling the API directly would never be asked to. So the rule is enforced on the
+   **server**, below.
+4. **A password change that left old sessions alive would defeat the point.** The creator's session, opened
+   with the temporary password, would survive the change. A change therefore ends every other session.
+5. **A reset without the role hierarchy lets hr take over an admin account**, by setting the admin's password
+   and signing in as them. Reset follows the same table that governs who may create which role.
+6. **There is no login throttling** (pre-existing, not built here), and people choose temporary passwords. They
+   will be weak and guessable during exactly the window this decision is about. Recorded as open, below.
+
+**Shape.**
+- **Migration `012_temporary_passwords`.** `users.must_change_password boolean NOT NULL DEFAULT false`, so
+  every existing account and the bootstrap admin are unaffected; `users.password_set_by_employee_id uuid
+  REFERENCES employees(id) ON DELETE SET NULL`, nullable so removing a creator never blocks; and a partial
+  index on flagged accounts. `users` already had `password_updated_at` and `last_login_at`.
+- **Migration `013_drop_password_set_tokens`.** Drops the table; its down recreates it exactly as `006`
+  defined it (a test compares the two). `006` is untouched.
+- **Create.** `POST /employees` requires `temporary_password` (a string of 8 to 200 characters, the one rule
+  every password follows). It is hashed with argon2id and is never stored, logged or returned (the validation
+  errors do not echo input). The account is created `users.status = 'active'` — **nobody is `invited` any
+  more** — with `must_change_password = true`, the creator's employee id in `password_set_by_employee_id`, and
+  `password_updated_at` stamped. [D35](#d35--employee-status-on-create) still holds: sign-in needs both
+  `users.status` and `employment_status` active, so an employee created inactive cannot sign in even with a
+  password. An update can never set a password (the update schema refuses it).
+- **The gate.** While the flag is set, the authentication middleware refuses every request except
+  `GET /auth/me` and `POST /auth/change-password`, with `403 password_change_required`. Login and refresh run
+  before that middleware and are unaffected. **The login response's principal gains `mustChangePassword`**; that
+  one key is what tells the client to redirect, and nothing was removed from the principal.
+- **`POST /auth/change-password`** `{ current_password, new_password }`. The current password (the temporary
+  one) must be supplied. A wrong one is **`403 current_password_incorrect`, deliberately not 401**: the client
+  reads a 401 as "your session is gone" and tries to refresh it. A new password equal to the current one is
+  `400 password_unchanged`, because "changing" it to the same string leaves the creator knowing it. In one
+  transaction it replaces the hash, clears the flag, stamps `password_updated_at` and revokes every refresh
+  token. It responds as login does — a fresh access token, the refresh cookie and the principal — so the
+  employee carries straight on without a second sign-in.
+- **Access tokens issued before the change are refused.** Revoking refresh tokens alone would leave an access
+  token minted under the temporary password valid until it expires (15 minutes by default). The principal
+  lookup now refuses a token whose issue time is before `password_updated_at`, compared in whole seconds with
+  `<=` so the token the change itself returns, in the same second, stays valid. The token's `iat`, which the
+  verifier used to discard, is now passed through.
+- **`POST /employees/:id/temporary-password`** `{ temporary_password }` → 204, **admin and hr only**, over the
+  roles `ROLE_ASSIGNMENTS` gives them: admin anyone but themselves; hr a manager, tl or employee but never an
+  admin or another hr; manager, tl and employee never; nobody their own (`self_reset_denied`: change it
+  instead). It sets the hash, sets the flag, records who did it, stamps `password_updated_at` and revokes the
+  target's refresh tokens, so the target is forced to change it at next sign-in and their sessions end. A reset
+  also **activates a leftover `invited` account** (one created under the old flow, with no password), because
+  the token path that used to do that is gone; it never touches an `inactive` or `suspended` one.
+- **Removed.** `POST /auth/set-password`, `POST /employees/:id/password-token`, the token service, repository
+  and schemas, `PASSWORD_SET_TOKEN_TTL_SECONDS`, `userRepository.findById` (unused), and the tests for all of
+  it. The table goes in `013`.
+- **Frontend.** The session store carries `mustChangePassword` from the principal (login and restore, so a
+  reload cannot skip it). `App.jsx` renders a **Change password** screen — the temporary password, the new one
+  and a confirmation, plus Sign out — before the workspace whenever it is set, so nothing of the app mounts,
+  polls or is refused in the meantime. Add Employee has a visible **Temporary password** field (required,
+  as typed, never trimmed) and the button reads "Create Employee"; after creating, the creator is told to give
+  the employee the password and that they must choose their own at first sign-in. Admin and hr get a **Reset
+  password** action per employee, shown only where the rules above would allow it. The set-password page,
+  route, hook and link helper are deleted.
+
+**Not built, still open:**
+- **Login throttling.** Nothing limits attempts against any account. It matters more now that a guessable
+  temporary password exists for a while by design. A separate piece of work.
+- **A self-service "forgot password"** (D34's open item, unchanged).
+- **Password strength beyond length**, and any expiry of an unused temporary password: a temporary password the
+  employee never uses stays valid.
+- **An audit trail of who completed the first change.** See point 2.
+
+**Verified by** the backend's unit and route tests, including
+real argon2 where "the old password stops working" is the claim; 21 deliberate mutations of the new backend code
+(the gate, the issue-time check, session revocation, the current-password check, the reset hierarchy, hashing,
+the audit column), each of which fails the suite and was restored; and `scripts/e2e-frontend-prereqs.js` on
+`sigma_hrm_scratch`, with real PostgreSQL and real argon2, covering create, the gate, the change, the end of
+every old session, reset, the hierarchy and the removal of the token flow. The frontend's pure parts (the session
+store, the change-password service, the reset rule and the mappers) have their own tests. A browser rehearsal
+against `sigma_hrm_scratch` (2026-10-10) walked it through the real UI: an admin creating a department inline
+(a duplicate refused with its own message) and an employee with a temporary password; the employee reaching only
+the Change password screen, including after a reload; a wrong current password, the same password, a mismatch
+and a too-short one each refused with their own message; the change carrying them into the app with no second
+sign-in, and the temporary password then failing; an admin's reset forcing the change again; hr offered no reset
+on an admin or another hr; manager and tl offered their own department as the one locked option and no reset;
+and a manager-created employee able to sign in at once, forced to change. Visual appearance (spacing, themes,
+small screens) was not checked: the browser pane could not render screenshots.
+
+### D42 — Creating a department from the Add Employee form — ✅ SETTLED
+
+**✅ SETTLED 2026-10-10.** The Department dropdown on the Add Employee form gains **"+ Create department…"**
+for an **admin only**. Choosing it reveals an inline name field with Create and Cancel; on success the new
+department is created and selected, without leaving the page.
+
+**Why admin only.** Department writes are admin-only: [§6](#6-authorization-model-in-the-new-stack) and the
+carried-forward ambiguity A4 ("HR cannot write departments") settle it; it is not a numbered decision.
+`POST /departments` already enforces it. **No backend change** was needed or made.
+
+**What the dropdown does for the roles that can see departments but cannot create them:**
+
+| Role | Dropdown |
+|---|---|
+| admin | every active department, plus "+ Create department…" |
+| hr | every active department and a one-line hint, "Only an administrator can add a new department." |
+| manager | their own department as the **single option**, locked |
+| tl | their own department as the **single option**, locked |
+
+The UI only decides what to show; the API is the authority. A department write from anyone but an admin is
+refused by the server, and a manager or tl cannot create an employee outside their own department whatever the
+form says.
+
+**A finding that is also a fix.** Manager and tl cannot read the departments list at all
+([D33](#d33--department-names-for-manager-tl-and-employee)), so the dropdown was built from an empty list: for
+them the Department field was **blank and disabled**. It now offers their own department, taken from their own
+session user, as the one locked option. The create option appears on **Add Employee only**, not Edit.
+
+**Details.** The new department is created `Active`, with no description and no manager (the create schema has
+none; a manager is chosen afterwards, once the department exists). A duplicate name is a 409, shown inline as
+"A department named … already exists." rather than in the server's own words. The department directory learns
+the new id on create, so the employee that follows can be created in it straight away; a department just
+created and selected stays selectable until the polled list includes it.
