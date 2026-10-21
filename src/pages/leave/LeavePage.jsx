@@ -5,13 +5,13 @@ import { Plus, Check, X } from "lucide-react";
 import { T } from "../../theme/theme";
 import { fdate } from "../../utils/helpers";
 import { can, scopeByEmployee } from "../../utils/permissions";
+import { usageCards } from "../../utils/leaveUsage";
 import Badge       from "../../components/badge/Badge";
 import Avatar      from "../../components/avatar/Avatar";
 import Modal       from "../../components/modal/Modal";
 import Input       from "../../components/input/Input";
 import Select      from "../../components/select/Select";
 import Btn         from "../../components/btn/Btn";
-import ProgressBar from "../../components/ProgressBar/ProgressBar";
 
 const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leaveBalances }) => {
   const [modal, setModal] = useState(false);
@@ -55,15 +55,14 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
         )}
       </div>
 
-      {/* Employee: leave balance cards */}
+      {/* Employee: leave usage cards (D40: there are no entitlements, so only days taken) */}
       {!canApproveLeave && (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
-          {Object.entries(myBal).map(([type, bal]) => (
+          {usageCards(myBal).map(({ type, days, year }) => (
             <div key={type} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, flex: "1 1 140px", minWidth: 140 }}>
               <div style={{ fontSize: 11, color: T.muted, fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>{type} Leave</div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: T.text }}>{bal.r}</div>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>of {bal.t} days remaining</div>
-              <ProgressBar value={bal.r} max={bal.t} color={bal.r > 5 ? T.success : T.warning} />
+              <div style={{ fontSize: 28, fontWeight: 800, color: T.text }}>{days}</div>
+              <div style={{ fontSize: 11, color: T.muted }}>days taken in {year}</div>
             </div>
           ))}
         </div>

@@ -4,6 +4,7 @@ import { Plus, Check, FileText, CreditCard } from "lucide-react";
 
 import { T } from "../../theme/theme";
 import { fmt, calcTax } from "../../utils/helpers";
+import { findRecordById } from "../../services/legacyShape";
 import Badge         from "../../components/badge/Badge";
 import Avatar        from "../../components/avatar/Avatar";
 import Modal         from "../../components/modal/Modal";
@@ -22,7 +23,7 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
   const [form,   setForm]   = useState({ month: "April", year: 2025, bonus: 0, deductions: 0 });
 
   const process = async () => {
-    const emp   = employees.find(e => e.id === +selEmp);
+    const emp   = findRecordById(employees, selEmp);
     if (!emp) return;
     const gross = emp.basic + emp.allowances + +form.bonus;
     const tax   = Math.round(calcTax(gross));
@@ -44,7 +45,7 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
   };
 
   // Preview calculation
-  const previewEmp   = selEmp ? employees.find(e => e.id === +selEmp) : null;
+  const previewEmp   = selEmp ? findRecordById(employees, selEmp) : null;
   const previewGross = previewEmp ? previewEmp.basic + previewEmp.allowances + +form.bonus : 0;
   const previewTax   = previewEmp ? Math.round(calcTax(previewGross)) : 0;
   const previewNet   = previewEmp ? previewGross - +form.deductions - previewTax : 0;

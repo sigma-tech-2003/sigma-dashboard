@@ -5,5 +5,7 @@
 export const withDocId = (record) => ({ ...record, _docId: record.id });
 
 /** The record with this id (compared as strings) from a list of page-shaped records, or null. */
-export const findRecordById = (records, id) =>
-  (Array.isArray(records) ? records : []).find((record) => String(record?.id) === String(id)) ?? null;
+export const findRecordById = (records, id) => {
+  if (id == null) return null;
+  return (Array.isArray(records) ? records : []).find((record) => record?.id != null && String(record.id) === String(id)) ?? null;
+};

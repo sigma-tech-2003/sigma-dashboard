@@ -16,6 +16,7 @@ import { T }          from "../../theme/theme";
 import { fmt, pct, fdate, getKpiRatingSummary, getProjectKpiRatingLabel, isValidProjectKpiScore, kpiScore, perfColor } from "../../utils/helpers";
 import { scopeAttendance, scopeEmployees, scopeByEmployee, scopeProjectKpis } from "../../utils/permissions";
 import { ANNOUNCEMENTS } from "../../data/announcements";
+import { totalTakenLabel, totalTakenSub } from "../../utils/leaveUsage";
 import Stat        from "../../components/stat/Stat";
 import LoadErrorGate from "../../components/load-error/LoadErrorGate";
 import Badge       from "../../components/badge/Badge";
@@ -802,7 +803,8 @@ const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendan
       .map(project => [String(project.id), project]),
   );
   const myBal    = leaveBalances[user.id] || {};
-  const annualLeft = myBal.Annual?.r ?? 15;
+  // D40: no entitlements, so no remaining figure; this is the days taken in the year, and "—" until it has loaded.
+  const leaveTaken = totalTakenLabel(myBal);
   const lastPayslip = payroll.find(record =>
     record.empId != null
     && user.id != null
@@ -829,7 +831,7 @@ const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendan
           sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} rated · ${averageCompletion === null ? "No target/current completion data" : `${averageCompletion}% average target/current completion`}`}
           color={T.purple}
         />
-        <Stat icon={Calendar}   label="Leave Balance"     value={`${annualLeft} days`} sub="Annual leave remaining"                                            color={T.warning}          />
+        <Stat icon={Calendar}   label="Leave Taken"       value={leaveTaken} sub={totalTakenSub(myBal)}  color={T.warning}          />
         <Stat icon={Clock}      label="Attendance %"      value={myAttendance.percentage === null ? "Not Marked" : `${myAttendance.percentage}%`} sub={myAttendance.total ? `${myAttendance.attended}/${myAttendance.total} present or late` : "No eligible attendance records"} color={T.secondary} />
         <Stat icon={DollarSign} label="My Payslips"       value={lastPayslip ? fmt(lastPayslip.net) : "—"} sub={lastPayslip ? `${lastPayslip.month} ${lastPayslip.year}` : "No payslip yet"} color={T.success} />
       </div>
