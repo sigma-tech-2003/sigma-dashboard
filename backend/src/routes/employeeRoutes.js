@@ -17,7 +17,8 @@ export function createEmployeeRouter(getEmployeeMutationService) {
   router.post("/", controller.create);
   router.patch("/:id", controller.update);
   router.delete("/:id", controller.remove);
-  router.post("/:id/password-token", controller.issuePasswordToken);
+  // D41: an admin or hr sets a new temporary password for an existing employee (forgot-password).
+  router.post("/:id/temporary-password", controller.resetPassword);
 
   return router;
 }

@@ -25,13 +25,14 @@ const PRINCIPAL = Object.freeze({
 
 /** Repositories replaced by fakes so these tests need no database. */
 function harness({ user, principal = PRINCIPAL } = {}) {
-  const state = { principal, refreshTokens: new Map(), lastLoginTouched: 0 };
+  const state = { principal, refreshTokens: new Map(), lastLoginTouched: 0, issuedAtSeen: [] };
 
   const userRepository = {
     async findAuthenticatableByEmail(email) {
       return user && user.email.toLowerCase() === String(email).toLowerCase() ? user : null;
     },
-    async findPrincipalByUserId(userId) {
+    async findPrincipalByUserId(userId, issuedAt) {
+      state.issuedAtSeen.push(issuedAt);
       return userId === USER_ID ? state.principal : null;
     },
     async touchLastLogin() {
@@ -112,10 +113,12 @@ test("verification returns false rather than throwing for unusable input", async
 // Tokens
 // ---------------------------------------------------------------------------
 
-test("access tokens round-trip and carry only the subject", () => {
+test("access tokens round-trip and carry only the subject (and the time they were issued, D41)", () => {
   const tokens = createTokenService(AUTH_CONFIG);
   const token = tokens.issueAccessToken(USER_ID);
-  assert.equal(tokens.verifyAccessToken(token), USER_ID);
+  const verified = tokens.verifyAccessToken(token);
+  assert.equal(verified.userId, USER_ID);
+  assert.equal(verified.issuedAt, jwt.decode(token).iat);
 
   const claims = jwt.decode(token);
   // Role and department must NOT be in the token: they are resolved per request, so an
@@ -313,4 +316,69 @@ test("logging out an unknown token is a no-op rather than an error", async () =>
   const { service } = harness({ user: await activeUser() });
   assert.equal(await service.logout({ refreshToken: "never-issued" }), 0);
   assert.equal(await service.logout({}), 0);
+});
+
+// ---------------------------------------------------------------------------
+// D41: the token's issue time, and the temporary-password flag on the principal
+// ---------------------------------------------------------------------------
+
+test("verifyAccessToken hands the token's issue time to the principal lookup (that is what ends old sessions after a password change)", async () => {
+  const { service, state } = harness();
+  const token = service.tokens.issueAccessToken(USER_ID);
+
+  await service.verifyAccessToken(token);
+
+  assert.deepEqual(state.issuedAtSeen, [jwt.decode(token).iat]);
+  assert.ok(Number.isInteger(state.issuedAtSeen[0]), "whole seconds");
+});
+
+test("a token with no issue time is unusable: the password-change check could not be applied to it", () => {
+  const tokens = createTokenService(AUTH_CONFIG);
+  // jsonwebtoken adds `iat` unless told not to; a token someone minted without it must be refused, not trusted.
+  const noIat = jwt.sign({}, AUTH_CONFIG.secret, {
+    algorithm: "HS256", subject: USER_ID, issuer: AUTH_CONFIG.issuer, audience: AUTH_CONFIG.audience,
+    expiresIn: 900, noTimestamp: true,
+  });
+
+  assert.throws(() => tokens.verifyAccessToken(noIat), (error) => error.statusCode === 401);
+});
+
+test("login looks the principal up with NO issue time (there is no token yet), and returns it as it is", async () => {
+  const user = { id: USER_ID, email: "a@example.com", password_hash: await hashPassword("temp-pass-1234"), role: "manager", status: "active" };
+  const flagged = { ...PRINCIPAL, mustChangePassword: true };
+  const { service, state } = harness({ user, principal: flagged });
+
+  const result = await service.login({ email: "a@example.com", password: "temp-pass-1234" });
+
+  assert.deepEqual(state.issuedAtSeen, [null]);
+  assert.equal(result.principal.mustChangePassword, true, "the client learns the flag from the login response, with no new field");
+});
+
+test("refresh returns the flag too, so a reload while on a temporary password lands back on the forced screen", async () => {
+  const user = { id: USER_ID, email: "a@example.com", password_hash: await hashPassword("temp-pass-1234"), role: "manager", status: "active" };
+  const { service } = harness({ user, principal: { ...PRINCIPAL, mustChangePassword: true } });
+  const { refreshToken } = await service.login({ email: "a@example.com", password: "temp-pass-1234" });
+
+  const refreshed = await service.refresh({ refreshToken });
+
+  assert.equal(refreshed.principal.mustChangePassword, true);
+});
+
+test("startSession issues a working access token and a stored, usable refresh token", async () => {
+  const { service, state } = harness();
+
+  const session = await service.startSession(USER_ID);
+
+  assert.equal(service.tokens.verifyAccessToken(session.accessToken).userId, USER_ID);
+  assert.equal(state.refreshTokens.size, 1);
+  assert.ok(state.refreshTokens.has(hashRefreshToken(session.refreshToken)));
+  assert.equal(session.principal.userId, USER_ID);
+  assert.equal(session.expiresIn, AUTH_CONFIG.accessTokenTtlSeconds);
+});
+
+test("startSession for an account that is no longer usable is a 401, and no token is stored", async () => {
+  const { service, state } = harness();
+
+  assert.equal(await codeOf(service.startSession("99999999-9999-9999-9999-999999999999")), "unauthenticated");
+  assert.equal(state.refreshTokens.size, 0);
 });

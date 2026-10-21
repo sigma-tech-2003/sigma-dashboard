@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { userRoleSchema, uuidSchema } from "./commonSchemas.js";
+import { passwordSchema } from "./passwordSchemas.js";
 
 // employees.employment_status enum (001_initial_core_hr_hierarchy.up.sql). An update may set any of
 // the four. A CREATE may set only 'active' or 'inactive' (D35): a pre-provisioned inactive account is
@@ -30,6 +31,9 @@ export const employeeCreateSchema = z.object({
   team_lead_id: uuidSchema.nullable().optional(),
   // Optional, defaulting to 'active' in the service (D35).
   employment_status: creatableEmploymentStatusSchema.optional(),
+  // D41: whoever creates an employee sets a TEMPORARY password; the employee must replace it at first sign-in.
+  // Required for every creator, and for an inactive employee too (they cannot sign in until activated anyway).
+  temporary_password: passwordSchema,
 }).strict();
 
 export const employeeUpdateSchema = z.object({

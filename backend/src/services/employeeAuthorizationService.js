@@ -38,6 +38,11 @@ const DELETABLE_ROLES = Object.freeze({
   employee: new Set(),
 });
 
+// D41: who may set a temporary password for an EXISTING employee. Narrower than ROLE_ASSIGNMENTS on purpose: a
+// manager or tl may set one at creation (for the person they create) but never reset one afterwards, matching D34's
+// refusal to spread credential-setting power wider than admin and hr.
+const PASSWORD_RESETTERS = new Set(["admin", "hr"]);
+
 const denied = (code, message) => new HttpError(403, code, message);
 
 function assertActingRoleKnown(principal) {
@@ -148,6 +153,30 @@ export function assertCanUpdateEmployee(principal, target, changes = {}) {
   }
 
   assertCompensationAuthority(principal, target, changes);
+}
+
+/**
+ * Reset authority (D41). Admin and hr only, and only over roles ROLE_ASSIGNMENTS lets them manage -- so hr can reset a
+ * manager, tl or employee but never an admin or another hr: setting someone's password and then signing in as them is
+ * account takeover, and hr taking over an admin would be exactly that. Never your own (change it instead: that path
+ * asks for the current password), and the target must be in the caller's scope.
+ */
+export function assertCanResetPassword(principal, target) {
+  assertActingRoleKnown(principal);
+  if (!target?.id) throw new HttpError(404, "not_found", "Employee not found.");
+
+  if (!PASSWORD_RESETTERS.has(principal.role)) {
+    throw denied("role_not_allowed", "Only admin or hr may set a temporary password.");
+  }
+  if (principal.employeeId === target.id) {
+    throw denied("self_reset_denied", "You cannot reset your own password. Change it instead.");
+  }
+  if (!ROLE_ASSIGNMENTS[principal.role].has(target.role)) {
+    throw denied("employee_scope_denied", "You cannot reset the password of an employee with this role.");
+  }
+  if (!scopeCoversEmployee(principal, target)) {
+    throw denied("employee_scope_denied", "This employee is outside your scope.");
+  }
 }
 
 /**

@@ -17,19 +17,41 @@ const unauthenticated = () =>
 export function createAuthService({ authConfig, userRepository, refreshTokenRepository }) {
   const tokens = createTokenService(authConfig);
 
-  async function resolvePrincipal(userId) {
-    const principal = await userRepository.findPrincipalByUserId(userId);
+  async function resolvePrincipal(userId, issuedAt = null) {
+    const principal = await userRepository.findPrincipalByUserId(userId, issuedAt);
     if (!principal) throw unauthenticated();
     return principal;
+  }
+
+  /** Issues an access token and a stored refresh token for a user who has just been authenticated. */
+  async function startSession(userId) {
+    const principal = await resolvePrincipal(userId);
+
+    const accessToken = tokens.issueAccessToken(userId);
+    const refresh = tokens.issueRefreshToken();
+    await refreshTokenRepository.store({
+      userId,
+      tokenHash: refresh.tokenHash,
+      expiresAt: refresh.expiresAt,
+    });
+
+    return {
+      principal,
+      accessToken,
+      refreshToken: refresh.token,
+      expiresIn: tokens.accessTokenTtlSeconds,
+    };
   }
 
   return Object.freeze({
     tokens,
 
     async verifyAccessToken(token) {
-      const userId = tokens.verifyAccessToken(token);
-      return resolvePrincipal(userId);
+      const { userId, issuedAt } = tokens.verifyAccessToken(token);
+      return resolvePrincipal(userId, issuedAt);
     },
+
+    startSession,
 
     async login({ email, password }) {
       const user = await userRepository.findAuthenticatableByEmail(email ?? "");
@@ -42,25 +64,14 @@ export function createAuthService({ authConfig, userRepository, refreshTokenRepo
       if (!user || !passwordMatches) throw unauthenticated();
       if (user.status !== "active") throw unauthenticated();
 
-      // Resolving the principal here applies the same active-account assertion used on
-      // every subsequent request, so a deactivated employee cannot obtain a token at all.
-      const principal = await resolvePrincipal(user.id);
-
-      const accessToken = tokens.issueAccessToken(user.id);
-      const refresh = tokens.issueRefreshToken();
-      await refreshTokenRepository.store({
-        userId: user.id,
-        tokenHash: refresh.tokenHash,
-        expiresAt: refresh.expiresAt,
-      });
+      // startSession resolves the principal first, which applies the same active-account assertion used on
+      // every subsequent request, so a deactivated employee cannot obtain a token at all. A principal flagged
+      // mustChangePassword (D41) is returned like any other: the client reads the flag, and the API refuses
+      // everything but the password change until it is cleared.
+      const session = await startSession(user.id);
       await userRepository.touchLastLogin(user.id);
 
-      return {
-        principal,
-        accessToken,
-        refreshToken: refresh.token,
-        expiresIn: tokens.accessTokenTtlSeconds,
-      };
+      return session;
     },
 
     /**

@@ -154,18 +154,19 @@ export function createEmployeeRepository(database) {
     },
 
     /**
-     * Creates the users row and the employees row in one transaction. The new account is
-     * always status = 'invited' with no password_hash -- nobody can log in until a separate
-     * flow sets one (not part of this phase). employee_number is drawn from
+     * Creates the users row and the employees row in one transaction. The new account is created ACTIVE with the
+     * creator's TEMPORARY password already hashed (D41): must_change_password is true, password_set_by_employee_id
+     * records who set it, and password_updated_at is stamped, so the employee must replace it at first sign-in and the
+     * API refuses them everything else until they do. employee_number is drawn from
      * next_employee_number() (migration 005 / D17), never invented here.
      *
      * `employmentStatus` (D35) is 'active' or 'inactive'; the service allows no other value at creation.
-     * users.status stays 'invited' either way: login needs BOTH users.status and employment_status to be
+     * users.status is 'active' either way: login needs BOTH users.status and employment_status to be
      * 'active', so an employee created inactive cannot log in whatever happens to their password.
      */
     async create({
       email, role, fullName, phone, departmentId, positionTitle, joinedOn, basic, allowances, teamLeadId,
-      employmentStatus = "active",
+      employmentStatus = "active", passwordHash, passwordSetByEmployeeId = null,
     }) {
       const client = await database.connect();
       try {
@@ -175,10 +176,11 @@ export function createEmployeeRepository(database) {
         if (!company) throw new HttpError(500, "internal", "No company exists to create an employee under.");
 
         const { rows: [user] } = await client.query(
-          `INSERT INTO users (company_id, email, role, status)
-           VALUES ($1, $2, $3, 'invited')
+          `INSERT INTO users (company_id, email, role, status, password_hash, must_change_password,
+                              password_set_by_employee_id, password_updated_at)
+           VALUES ($1, $2, $3, 'active', $4, true, $5, now())
            RETURNING id`,
-          [company.id, email, role],
+          [company.id, email, role, passwordHash, passwordSetByEmployeeId],
         );
 
         const { rows: [{ employee_number: employeeNumber }] } = await client.query(

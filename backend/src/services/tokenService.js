@@ -28,7 +28,11 @@ export function createTokenService(authConfig) {
       });
     },
 
-    /** Returns the subject (user id). Throws HttpError 401 for anything unusable. */
+    /**
+     * Returns `{ userId, issuedAt }`: the subject and the token's issue time in whole seconds (`iat`). The issue time is
+     * what lets a password change end every session opened under the old password (D41): the principal query refuses
+     * a token issued before the password last changed. Throws HttpError 401 for anything unusable.
+     */
     verifyAccessToken(token) {
       try {
         // algorithms is pinned explicitly. Without it, a token with alg:"none" or a
@@ -38,10 +42,10 @@ export function createTokenService(authConfig) {
           issuer,
           audience,
         });
-        if (!claims?.sub) {
+        if (!claims?.sub || !Number.isInteger(claims.iat)) {
           throw new HttpError(401, "unauthenticated", "Authentication is required.");
         }
-        return claims.sub;
+        return { userId: claims.sub, issuedAt: claims.iat };
       } catch (error) {
         if (error instanceof HttpError) throw error;
         throw new HttpError(401, "unauthenticated", "Authentication is required.");

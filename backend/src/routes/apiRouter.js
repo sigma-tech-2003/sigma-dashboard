@@ -9,6 +9,7 @@ import { healthRouter } from "./healthRoutes.js";
 import { createKpiRouter } from "./kpiRoutes.js";
 import { createLeaveBalanceRouter } from "./leaveBalanceRoutes.js";
 import { createLeaveRouter } from "./leaveRoutes.js";
+import { createPasswordRouter } from "./passwordRoutes.js";
 import { createPayrollRouter } from "./payrollRoutes.js";
 import { createProfileRouter } from "./profileRoutes.js";
 import { createProjectRouter } from "./projectRoutes.js";
@@ -32,12 +33,12 @@ const RESOURCE_ROUTES = [
 ];
 
 /**
- * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object, profileService?: object, employeeMutationService?: object, departmentMutationService?: object, attendanceMutationService?: object, payrollMutationService?: object, projectMutationService?: object, kpiMutationService?: object, leaveMutationService?: object, leaveBalanceService?: object, passwordSetService?: object }} [dependencies]
+ * @param {{ verifyAccessToken?: (token: string) => Promise<object>, repositories?: object, authService?: object, profileService?: object, passwordService?: object, employeeMutationService?: object, departmentMutationService?: object, attendanceMutationService?: object, payrollMutationService?: object, projectMutationService?: object, kpiMutationService?: object, leaveMutationService?: object, leaveBalanceService?: object }} [dependencies]
  *   `repositories` lets tests inject fakes keyed the same as the container
  *   (employeeRepository, departmentRepository, ...) without a database. `authService`,
  *   `employeeMutationService`, `departmentMutationService`, `attendanceMutationService`,
  *   `payrollMutationService`, `projectMutationService`, `kpiMutationService`,
- *   `leaveMutationService`, `leaveBalanceService` and `passwordSetService` let tests inject
+ *   `leaveMutationService`, `leaveBalanceService` and `passwordService` let tests inject
  *   fake/differently-backed services for the routes mounted below.
  */
 export function createApiRouter(dependencies = {}) {
@@ -48,12 +49,11 @@ export function createApiRouter(dependencies = {}) {
   router.use(healthRouter);
 
   // Mounted before the authentication middleware: a caller has no bearer token yet when
-  // logging in, and refresh/logout/set-password authenticate via their own token/cookie
+  // logging in, and refresh/logout authenticate via their own cookie
   // instead of a bearer token. Resolved per-request via a getter, matching getRepository()
   // below, so importing this module never opens a pool or demands AUTH_TOKEN_SECRET.
   const getAuthService = () => dependencies.authService ?? getContainer().authService;
-  const getPasswordSetService = () => dependencies.passwordSetService ?? getContainer().passwordSetService;
-  router.use("/auth", createAuthRouter({ getAuthService, getPasswordSetService }));
+  router.use("/auth", createAuthRouter({ getAuthService }));
 
   // Everything mounted after this line requires a bearer token. The middleware sets
   // req.principal, resolved from the database on every request, so a deactivated account
@@ -67,6 +67,10 @@ export function createApiRouter(dependencies = {}) {
   // the public auth router (which has no such route) and is stopped by the middleware with a 401.
   const getProfileService = () => dependencies.profileService ?? getContainer().profileService;
   router.use("/auth", createProfileRouter(getProfileService));
+
+  // POST /auth/change-password (D41) needs a bearer token too, and is one of the two routes a flagged account may use.
+  const getPasswordService = () => dependencies.passwordService ?? getContainer().passwordService;
+  router.use("/auth", createPasswordRouter({ getAuthService, getPasswordService }));
 
   for (const { path, repositoryKey, resourceName } of RESOURCE_ROUTES) {
     // Deferred: must not call getContainer() while building the router, only when a

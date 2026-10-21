@@ -1,8 +1,10 @@
 import { HttpError } from "../utils/httpError.js";
 import { DEPARTMENT_SCOPED_ROLES, TEAM_SCOPED_ROLES } from "../utils/roles.js";
+import { hashPassword } from "../utils/password.js";
 import {
   assertCanCreateEmployee,
   assertCanDeleteEmployee,
+  assertCanResetPassword,
   assertCanUpdateEmployee,
 } from "./employeeAuthorizationService.js";
 
@@ -44,7 +46,11 @@ async function assertValidTeamLead(employeeRepository, teamLeadId, departmentId)
   }
 }
 
-export function createEmployeeMutationService({ employeeRepository, passwordSetService }) {
+/**
+ * @param {{ employeeRepository: object, userRepository: object, hash?: Function }} dependencies
+ *   `hash` is injectable so tests do not pay argon2's cost.
+ */
+export function createEmployeeMutationService({ employeeRepository, userRepository, hash = hashPassword }) {
   /**
    * A manager/tl creating an employee defaults department_id (and, for a tl, team_lead_id)
    * to their own scope when omitted -- employeeInvitationPolicy.js's `creatorIsScoped`
@@ -67,8 +73,10 @@ export function createEmployeeMutationService({ employeeRepository, passwordSetS
 
   return Object.freeze({
     /**
-     * Creates the employee plus their user row (status invited, no password -- see
-     * employeeRepository.js). employment_status may be 'active' (the default) or 'inactive' (D35);
+     * Creates the employee plus their user row, with the creator's TEMPORARY password (D41): hashed here, flagged
+     * must_change_password, and attributed to the creator (password_set_by_employee_id). The employee must replace it
+     * at first sign-in; until they do, the API refuses them everything else. The plain password goes no further than
+     * this function. employment_status may be 'active' (the default) or 'inactive' (D35);
      * the schema refuses 'terminated' and 'on_leave', since a brand new hire cannot sensibly start
      * either. Nothing here gates it beyond who may create the employee at all.
      */
@@ -91,6 +99,8 @@ export function createEmployeeMutationService({ employeeRepository, passwordSetS
         allowances: attributes.allowances,
         teamLeadId: attributes.team_lead_id,
         employmentStatus: attributes.employment_status ?? "active",
+        passwordHash: await hash(attributes.temporary_password),
+        passwordSetByEmployeeId: principal.employeeId,
       });
     },
 
@@ -129,16 +139,21 @@ export function createEmployeeMutationService({ employeeRepository, passwordSetS
     },
 
     /**
-     * Bridges employeeId -> user_id and hands off to passwordSetService, which knows
-     * nothing about employees at all -- it only ever deals in users. Authorization
-     * (admin/hr only, deliberately narrower than "whoever may update this employee") and
-     * the invited-status check both live in passwordSetService, not here.
+     * Sets a new TEMPORARY password for an existing employee (D41), the forgot-password path. Admin or hr only, and
+     * only for roles the caller may manage (assertCanResetPassword): letting hr reset an admin would let hr take over
+     * the admin's account. The employee must replace it at their next sign-in, and every session they have open ends.
      */
-    async issuePasswordSetToken(principal, employeeId) {
+    async resetPassword(principal, employeeId, temporaryPassword) {
       const target = await employeeRepository.findById(employeeId);
-      if (!target) throw new HttpError(404, "not_found", "Employee not found.");
+      // assertCanResetPassword throws its own 404 when target is null.
+      assertCanResetPassword(principal, target);
 
-      return passwordSetService.issueTokenForUser(principal, target.user_id);
+      const changed = await userRepository.setTemporaryPassword(
+        target.user_id,
+        await hash(temporaryPassword),
+        principal.employeeId,
+      );
+      if (!changed) throw new HttpError(404, "not_found", "Employee not found.");
     },
   });
 }

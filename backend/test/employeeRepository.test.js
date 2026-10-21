@@ -37,6 +37,7 @@ const CREATE_INPUT = Object.freeze({
   email: "new.hire@example.com", role: "employee", fullName: "New Hire", phone: null,
   departmentId: "dept-1", positionTitle: "Engineer", joinedOn: "2026-09-25",
   basic: 50000, allowances: 0, teamLeadId: null,
+  passwordHash: "hashed-temp-password", passwordSetByEmployeeId: "creator-employee-1",
 });
 
 // ---------------------------------------------------------------------------
@@ -60,10 +61,12 @@ test("create: happy path inserts users then employees, in one transaction, and r
   assert.equal(database.calls.at(-1).text, "COMMIT");
 
   const userInsert = database.calls.find((call) => call.text.includes("INSERT INTO users"));
-  assert.match(userInsert.text, /status\)/); // status column present in the insert list
-  assert.match(userInsert.text, /'invited'/); // ...and hard-coded to 'invited'
-  assert.doesNotMatch(userInsert.text, /password_hash/i, "create must never set a password");
-  assert.deepEqual(userInsert.values, ["company-1", "new.hire@example.com", "employee"]);
+  // D41: the account is created ACTIVE with the creator's TEMPORARY password (already hashed by the service), flagged
+  // must_change_password, and attributed to the creator.
+  assert.match(userInsert.text, /status,\s*password_hash,\s*must_change_password/);
+  assert.match(userInsert.text, /VALUES \(\$1, \$2, \$3, 'active', \$4, true, \$5, now\(\)\)/);
+  assert.doesNotMatch(userInsert.text, /'invited'/, "nobody is invited any more");
+  assert.deepEqual(userInsert.values, ["company-1", "new.hire@example.com", "employee", "hashed-temp-password", "creator-employee-1"]);
 
   const employeeInsert = database.calls.find((call) => call.text.includes("INSERT INTO employees"));
   assert.deepEqual(employeeInsert.values, [
@@ -93,7 +96,7 @@ test("create: D35 -- employment_status is written, defaulting to 'active' and ac
   assert.equal(inactiveInsert.values.at(-1), "inactive");
 });
 
-test("create: D35 -- the user account is 'invited' whatever the employment status, so activating later is possible", async () => {
+test("create: D35 + D41 -- the user account is 'active' whatever the employment status; employment_status alone blocks sign-in", async () => {
   const database = fakeDatabase([
     ["SELECT id FROM companies LIMIT 1", { rows: [{ id: "company-1" }] }],
     ["INSERT INTO users", { rows: [{ id: "user-1" }] }],
@@ -104,8 +107,38 @@ test("create: D35 -- the user account is 'invited' whatever the employment statu
   await createEmployeeRepository(database).create({ ...CREATE_INPUT, employmentStatus: "inactive" });
 
   const userInsert = database.calls.find((call) => call.text.includes("INSERT INTO users"));
-  assert.match(userInsert.text, /'invited'/);
+  assert.match(userInsert.text, /'active'/);
   assert.doesNotMatch(userInsert.text, /inactive/);
+  assert.equal(database.calls.find((call) => call.text.includes("INSERT INTO employees")).values.at(-1), "inactive");
+});
+
+test("create: D41 -- the plain password never reaches SQL: only the hash it is given, and the creator, are written", async () => {
+  const database = fakeDatabase([
+    ["SELECT id FROM companies LIMIT 1", { rows: [{ id: "company-1" }] }],
+    ["INSERT INTO users", { rows: [{ id: "user-1" }] }],
+    ["next_employee_number()", { rows: [{ employee_number: "EMP-0001" }] }],
+    ["INSERT INTO employees", { rows: [{ id: "employee-1" }] }],
+    [/SELECT[\s\S]*FROM employees[\s\S]*JOIN users/, { rows: [JOINED_ROW] }],
+  ]);
+  await createEmployeeRepository(database).create({ ...CREATE_INPUT, passwordHash: "argon2-hash", passwordSetByEmployeeId: "creator-1" });
+
+  const userInsert = database.calls.find((call) => call.text.includes("INSERT INTO users"));
+  assert.deepEqual(userInsert.values.slice(3), ["argon2-hash", "creator-1"]);
+  assert.equal(JSON.stringify(database.calls).includes("temp-pass"), false);
+});
+
+test("create: D41 -- the re-selected employee row exposes no password column of any kind", async () => {
+  const database = fakeDatabase([
+    ["SELECT id FROM companies LIMIT 1", { rows: [{ id: "company-1" }] }],
+    ["INSERT INTO users", { rows: [{ id: "user-1" }] }],
+    ["next_employee_number()", { rows: [{ employee_number: "EMP-0001" }] }],
+    ["INSERT INTO employees", { rows: [{ id: "employee-1" }] }],
+    [/SELECT[\s\S]*FROM employees[\s\S]*JOIN users/, { rows: [JOINED_ROW] }],
+  ]);
+  await createEmployeeRepository(database).create(CREATE_INPUT);
+
+  const reselect = database.calls.find((call) => /FROM employees[\s\S]*JOIN users/.test(call.text) && !call.text.includes("INSERT"));
+  assert.doesNotMatch(reselect.text, /password/i);
 });
 
 // ---------------------------------------------------------------------------

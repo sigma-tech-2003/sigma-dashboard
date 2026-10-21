@@ -7,14 +7,13 @@ import { createKpiRepository } from "./repositories/kpiRepository.js";
 import { createLeaveRepository } from "./repositories/leaveRepository.js";
 import { createPayrollRepository } from "./repositories/payrollRepository.js";
 import { createProjectRepository } from "./repositories/projectRepository.js";
-import { createPasswordSetTokenRepository } from "./repositories/passwordSetTokenRepository.js";
 import { createRefreshTokenRepository } from "./repositories/refreshTokenRepository.js";
 import { createUserRepository } from "./repositories/userRepository.js";
 import { createAttendanceMutationService } from "./services/attendanceMutationService.js";
 import { createAuthService } from "./services/authService.js";
 import { createDepartmentMutationService } from "./services/departmentMutationService.js";
 import { createEmployeeMutationService } from "./services/employeeMutationService.js";
-import { createPasswordSetService } from "./services/passwordSetService.js";
+import { createPasswordService } from "./services/passwordService.js";
 import { createKpiMutationService } from "./services/kpiMutationService.js";
 import { createLeaveBalanceService } from "./services/leaveBalanceService.js";
 import { createLeaveMutationService } from "./services/leaveMutationService.js";
@@ -41,11 +40,10 @@ export function getContainer() {
     const projectRepository = createProjectRepository(database);
     const kpiRepository = createKpiRepository(database);
     const leaveRepository = createLeaveRepository(database);
-    const passwordSetTokenRepository = createPasswordSetTokenRepository(database);
-    const passwordSetService = createPasswordSetService({
-      passwordSetTokenRepository,
+    const authService = createAuthService({
+      authConfig,
       userRepository,
-      passwordSetTokenTtlSeconds: authConfig.passwordSetTokenTtlSeconds,
+      refreshTokenRepository,
     });
 
     container = Object.freeze({
@@ -53,21 +51,16 @@ export function getContainer() {
       userRepository,
       refreshTokenRepository,
       employeeRepository,
-      passwordSetTokenRepository,
       departmentRepository,
       projectRepository,
       kpiRepository,
       leaveRepository,
       attendanceRepository,
       payrollRepository,
-      authService: createAuthService({
-        authConfig,
-        userRepository,
-        refreshTokenRepository,
-      }),
-      passwordSetService,
+      authService,
+      passwordService: createPasswordService({ userRepository, authService }),
       profileService: createProfileService({ employeeRepository }),
-      employeeMutationService: createEmployeeMutationService({ employeeRepository, passwordSetService }),
+      employeeMutationService: createEmployeeMutationService({ employeeRepository, userRepository }),
       departmentMutationService: createDepartmentMutationService({ departmentRepository }),
       attendanceMutationService: createAttendanceMutationService({
         attendanceRepository,

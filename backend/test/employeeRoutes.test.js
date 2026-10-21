@@ -72,8 +72,25 @@ function fakeEmployeeRepository(seedEmployees = []) {
   };
 }
 
-async function startApp(principal, repository) {
-  const employeeMutationService = createEmployeeMutationService({ employeeRepository: repository });
+// Argon2 is slow and is not what these tests are about; the stand-in is opaque so a test can prove the PLAIN password
+// never reaches the repository.
+const hashOf = (plain) => `hashed:${Buffer.from(plain).toString("base64")}`;
+
+function fakeUserRepository() {
+  const calls = { setTemporaryPassword: [] };
+  return {
+    calls,
+    async setTemporaryPassword(userId, passwordHash, setByEmployeeId) {
+      calls.setTemporaryPassword.push({ userId, passwordHash, setByEmployeeId });
+      return true;
+    },
+  };
+}
+
+async function startApp(principal, repository, { userRepository = fakeUserRepository() } = {}) {
+  const employeeMutationService = createEmployeeMutationService({
+    employeeRepository: repository, userRepository, hash: async (plain) => hashOf(plain),
+  });
   const app = createApp({
     verifyAccessToken: async () => principal,
     repositories: {},
@@ -102,6 +119,7 @@ async function startApp(principal, repository) {
 const VALID_CREATE_BODY = Object.freeze({
   email: "new.hire@example.com", role: "employee", full_name: "New Hire",
   position_title: "Engineer", joined_on: "2026-09-25", basic: 50000, allowances: 0,
+  temporary_password: "temp-pass-1234",
 });
 
 // ---------------------------------------------------------------------------
@@ -445,6 +463,179 @@ test("decision D16, end to end: deleting a tl with zero members succeeds outrigh
     const response = await app.request("DELETE", `/api/v1/employees/${tl.id}`);
     assert.equal(response.status, 204);
     assert.deepEqual(repository.calls.deleteById[0].options, { replacementTeamLeadId: null, reassignedMemberIds: [] });
+  } finally {
+    await app.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/employees -- the temporary password (D41)
+// ---------------------------------------------------------------------------
+
+test("POST /employees: D41 -- a temporary password is REQUIRED, for every creator, and nothing is created without one", async () => {
+  for (const role of ["admin", "hr", "manager", "tl"]) {
+    const repository = fakeEmployeeRepository([employee({ id: SELF, role: "tl" })]);
+    const app = await startApp(principalFor(role), repository);
+    try {
+      const { temporary_password, ...withoutPassword } = VALID_CREATE_BODY;
+      const response = await app.request("POST", "/api/v1/employees", { ...withoutPassword, department_id: DEPARTMENT });
+
+      assert.equal(response.status, 400, role);
+      assert.equal(response.body.error.code, "invalid_request", role);
+      assert.equal(repository.calls.create.length, 0, role);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("POST /employees: D41 -- a password shorter than 8 or longer than 200 characters is a 400, and nothing is created", async () => {
+  for (const bad of ["", "short", "1234567", "x".repeat(201), 12345678, null]) {
+    const repository = fakeEmployeeRepository();
+    const app = await startApp(principalFor("admin"), repository);
+    try {
+      const response = await app.request("POST", "/api/v1/employees", { ...VALID_CREATE_BODY, department_id: DEPARTMENT, temporary_password: bad });
+
+      assert.equal(response.status, 400, JSON.stringify(bad));
+      assert.equal(repository.calls.create.length, 0, JSON.stringify(bad));
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("POST /employees: D41 -- the limits are inclusive: 8 and 200 characters are accepted", async () => {
+  for (const ok of ["12345678", "x".repeat(200)]) {
+    const app = await startApp(principalFor("admin"), fakeEmployeeRepository());
+    try {
+      const response = await app.request("POST", "/api/v1/employees", { ...VALID_CREATE_BODY, department_id: DEPARTMENT, temporary_password: ok });
+      assert.equal(response.status, 201, `${ok.length} characters`);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("POST /employees: D41 -- the repository gets the HASH, and neither the password nor the hash is in the response", async () => {
+  const repository = fakeEmployeeRepository();
+  const app = await startApp(principalFor("admin"), repository);
+  try {
+    const response = await app.request("POST", "/api/v1/employees", { ...VALID_CREATE_BODY, department_id: DEPARTMENT });
+
+    assert.equal(response.status, 201);
+    assert.equal(repository.calls.create[0].passwordHash, hashOf("temp-pass-1234"));
+    const text = JSON.stringify(response.body);
+    assert.equal(text.includes("temp-pass-1234"), false, "the plain password is never echoed");
+    assert.equal(text.includes(hashOf("temp-pass-1234")), false, "the hash is never echoed either");
+    assert.equal(/password/i.test(text), false, "no password field of any kind");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /employees: D41 -- a validation error never echoes the password that was submitted", async () => {
+  const app = await startApp(principalFor("admin"), fakeEmployeeRepository());
+  try {
+    const response = await app.request("POST", "/api/v1/employees", { ...VALID_CREATE_BODY, department_id: DEPARTMENT, temporary_password: "short" });
+
+    assert.equal(response.status, 400);
+    assert.equal(JSON.stringify(response.body).includes("short"), false);
+  } finally {
+    await app.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/employees/:id/temporary-password -- reset (D41)
+// ---------------------------------------------------------------------------
+
+test("POST /employees/:id/temporary-password: admin resets a manager's password -- 204, hashed, attributed, nothing echoed", async () => {
+  const target = employee({ id: randomUUID(), role: "manager" });
+  const userRepository = fakeUserRepository();
+  const app = await startApp(principalFor("admin"), fakeEmployeeRepository([target]), { userRepository });
+  try {
+    const response = await app.request("POST", `/api/v1/employees/${target.id}/temporary-password`, { temporary_password: "reset-pass-5678" });
+
+    assert.equal(response.status, 204);
+    assert.equal(response.body, null);
+    assert.deepEqual(userRepository.calls.setTemporaryPassword.map(({ passwordHash, setByEmployeeId }) => ({ passwordHash, setByEmployeeId })), [
+      { passwordHash: hashOf("reset-pass-5678"), setByEmployeeId: SELF },
+    ]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /employees/:id/temporary-password: hr resets an employee but gets 403 for an admin or another hr", async () => {
+  const targets = { employee: employee({ id: randomUUID(), role: "employee" }), admin: employee({ id: randomUUID(), role: "admin" }), hr: employee({ id: randomUUID(), role: "hr" }) };
+  const userRepository = fakeUserRepository();
+  const app = await startApp(principalFor("hr"), fakeEmployeeRepository(Object.values(targets)), { userRepository });
+  try {
+    const body = { temporary_password: "reset-pass-5678" };
+
+    assert.equal((await app.request("POST", `/api/v1/employees/${targets.employee.id}/temporary-password`, body)).status, 204);
+    for (const role of ["admin", "hr"]) {
+      const refused = await app.request("POST", `/api/v1/employees/${targets[role].id}/temporary-password`, body);
+      assert.equal(refused.status, 403, role);
+      assert.equal(refused.body.error.code, "employee_scope_denied", role);
+    }
+    assert.equal(userRepository.calls.setTemporaryPassword.length, 1, "only the employee's password was ever written");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /employees/:id/temporary-password: manager, tl and employee are refused (403)", async () => {
+  const target = employee({ id: randomUUID(), role: "employee" });
+  for (const role of ["manager", "tl", "employee"]) {
+    const userRepository = fakeUserRepository();
+    const app = await startApp(principalFor(role), fakeEmployeeRepository([target]), { userRepository });
+    try {
+      const response = await app.request("POST", `/api/v1/employees/${target.id}/temporary-password`, { temporary_password: "reset-pass-5678" });
+
+      assert.equal(response.status, 403, role);
+      assert.equal(userRepository.calls.setTemporaryPassword.length, 0, role);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("POST /employees/:id/temporary-password: nobody resets their own -- 403 self_reset_denied", async () => {
+  const self = employee({ id: SELF, role: "admin" });
+  const app = await startApp(principalFor("admin"), fakeEmployeeRepository([self]));
+  try {
+    const response = await app.request("POST", `/api/v1/employees/${SELF}/temporary-password`, { temporary_password: "reset-pass-5678" });
+
+    assert.equal(response.status, 403);
+    assert.equal(response.body.error.code, "self_reset_denied");
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /employees/:id/temporary-password: a bad password or a stray field is a 400; a malformed or unknown id is a 404", async () => {
+  const target = employee({ id: randomUUID(), role: "employee" });
+  const userRepository = fakeUserRepository();
+  const app = await startApp(principalFor("admin"), fakeEmployeeRepository([target]), { userRepository });
+  try {
+    for (const body of [{}, { temporary_password: "short" }, { temporary_password: "x".repeat(201) }, { temporary_password: "reset-pass-5678", role: "admin" }]) {
+      assert.equal((await app.request("POST", `/api/v1/employees/${target.id}/temporary-password`, body)).status, 400, JSON.stringify(body));
+    }
+    assert.equal((await app.request("POST", "/api/v1/employees/not-a-uuid/temporary-password", { temporary_password: "reset-pass-5678" })).status, 404);
+    assert.equal((await app.request("POST", `/api/v1/employees/${randomUUID()}/temporary-password`, { temporary_password: "reset-pass-5678" })).status, 404);
+    assert.equal(userRepository.calls.setTemporaryPassword.length, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test("the set-password token routes are GONE (D41): /auth/set-password and /employees/:id/password-token are 404", async () => {
+  const target = employee({ id: randomUUID(), role: "employee" });
+  const app = await startApp(principalFor("admin"), fakeEmployeeRepository([target]));
+  try {
+    assert.equal((await app.request("POST", "/api/v1/auth/set-password", { token: "x", password: "whatever-123" })).status, 404);
+    assert.equal((await app.request("POST", `/api/v1/employees/${target.id}/password-token`)).status, 404);
   } finally {
     await app.close();
   }

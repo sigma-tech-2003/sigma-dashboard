@@ -1,5 +1,5 @@
 import { environment } from "../config/env.js";
-import { setPasswordSchema } from "../validation/passwordSetSchemas.js";
+import { changePasswordSchema } from "../validation/passwordSchemas.js";
 import { HttpError } from "../utils/httpError.js";
 
 /**
@@ -52,7 +52,7 @@ function readRefreshTokenCookie(req) {
   return null;
 }
 
-export function createAuthController({ getAuthService, getPasswordSetService }) {
+export function createAuthController({ getAuthService, getPasswordService }) {
   return {
     async login(req, res, next) {
       try {
@@ -102,23 +102,30 @@ export function createAuthController({ getAuthService, getPasswordSetService }) 
     },
 
     /**
-     * Public: completes an invited employee's onboarding. The token proves identity by
-     * itself here -- there is no bearer token yet, which is why this sits before the
-     * authentication middleware alongside login/refresh/logout rather than under
-     * /employees. A malformed body (missing token/password, password too short) is a 400;
-     * an unknown, expired, or already-used token is a 400 with the SAME generic message --
-     * passwordSetService.redeemToken already guarantees that, this just doesn't add a
-     * second, better-informed error path that could leak which one applied.
+     * Authenticated (this is mounted AFTER the authentication middleware; see routes/passwordRoutes.js): the owner
+     * replaces their own password (D41). Responds exactly as login does -- a fresh access token in the body and a
+     * fresh refresh cookie -- because every other session is revoked and the caller must carry on with a new one.
+     * The old refresh cookie, now revoked, is overwritten by the same cookie name and path.
      */
-    async setPassword(req, res, next) {
+    async changePassword(req, res, next) {
       try {
-        const parsed = setPasswordSchema.safeParse(req.body);
+        const parsed = changePasswordSchema.safeParse(req.body);
         if (!parsed.success) {
-          throw new HttpError(400, "invalid_request", "A token and a password (at least 8 characters) are required.");
+          throw new HttpError(
+            400,
+            "invalid_request",
+            "A current password and a new password of 8 to 200 characters are required.",
+          );
         }
 
-        await getPasswordSetService().redeemToken(parsed.data.token, parsed.data.password);
-        res.status(204).end();
+        const { principal, accessToken, refreshToken, expiresIn } = await getPasswordService().changeOwnPassword(
+          req.principal,
+          { currentPassword: parsed.data.current_password, newPassword: parsed.data.new_password },
+        );
+
+        const authService = getAuthService();
+        res.cookie(REFRESH_TOKEN_COOKIE_NAME, refreshToken, refreshTokenCookieOptions(authService.tokens.refreshTokenTtlSeconds));
+        res.json({ data: { accessToken, expiresIn, principal } });
       } catch (error) {
         next(error);
       }

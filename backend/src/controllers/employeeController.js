@@ -1,6 +1,7 @@
 import { HttpError } from "../utils/httpError.js";
 import { uuidSchema } from "../validation/commonSchemas.js";
 import { employeeCreateSchema, employeeDeleteSchema, employeeUpdateSchema } from "../validation/employeeSchemas.js";
+import { resetPasswordSchema } from "../validation/passwordSchemas.js";
 
 const notFound = () => new HttpError(404, "not_found", "The requested employee was not found.");
 const invalidRequest = (message) => new HttpError(400, "invalid_request", message);
@@ -62,19 +63,20 @@ export function createEmployeeController(getEmployeeMutationService) {
     },
 
     /**
-     * Admin/hr only -- enforced in passwordSetService, not here (see its module docstring
-     * for why this is deliberately narrower than "whoever may update this employee").
-     * Returns the raw token exactly once; it is never retrievable again. See
-     * docs/schema-design.md's decision entry for why it is returned here rather than
-     * emailed, and that this is an interim mechanism.
+     * Admin/hr only, and only for roles the caller may manage -- enforced in the service (assertCanResetPassword),
+     * not here. Sets a new TEMPORARY password for an existing employee (D41): they must change it at their next
+     * sign-in, and every session they have open is ended. 204: the password is never echoed.
      */
-    async issuePasswordToken(req, res, next) {
+    async resetPassword(req, res, next) {
       try {
         const { success: idOk, data: id } = uuidSchema.safeParse(req.params.id);
         if (!idOk) throw notFound();
 
-        const { token, expiresAt } = await getEmployeeMutationService().issuePasswordSetToken(req.principal, id);
-        res.status(201).json({ data: { token, expiresAt } });
+        const parsed = resetPasswordSchema.safeParse(req.body);
+        if (!parsed.success) throw invalidRequest("A temporary password of 8 to 200 characters is required.");
+
+        await getEmployeeMutationService().resetPassword(req.principal, id, parsed.data.temporary_password);
+        res.status(204).end();
       } catch (error) {
         next(error);
       }
