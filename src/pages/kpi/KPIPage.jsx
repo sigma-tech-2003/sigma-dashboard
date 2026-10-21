@@ -23,6 +23,7 @@ import {
 import Avatar      from "../../components/avatar/Avatar";
 import EmptyState  from "../../components/empty-state/EmptyState";
 import FormFeedback from "../../components/form-feedback/FormFeedback";
+import { guardedSave } from "../../utils/saveErrors";
 import Modal       from "../../components/modal/Modal";
 import Input       from "../../components/input/Input";
 import Select      from "../../components/select/Select";
@@ -62,6 +63,7 @@ const KPIPage = ({
   const [saving, setSaving] = useState(false);
   const [ratingValues, setRatingValues] = useState({});
   const [ratingErrors, setRatingErrors] = useState({});
+  const [updateErrors, setUpdateErrors] = useState({});
   const [savingRatings, setSavingRatings] = useState({});
   const submissionInProgress = useRef(false);
   const ratingSavesInProgress = useRef(new Set());
@@ -206,9 +208,16 @@ const KPIPage = ({
     }
   };
 
-  const updateCurrent = async (id, val) => {
+  // `input` is the field the person typed in. When the save fails it goes back to the saved value, so the screen never
+  // shows a number that was not stored.
+  const updateCurrent = async (id, val, input, storedValue) => {
     if (!canManageKpis) return;
-    await updateKpi(id, { current: Math.max(0, +val) });
+    setUpdateErrors((current) => ({ ...current, [id]: "" }));
+    const result = await guardedSave(() => updateKpi(id, { current: Math.max(0, +val) }), { fallback: "The progress could not be saved. Please try again." });
+    if (!result.ok) {
+      setUpdateErrors((current) => ({ ...current, [id]: result.message }));
+      if (input) input.value = String(storedValue ?? "");
+    }
   };
 
   const changeRating = (kpiKey, value) => {
@@ -433,9 +442,14 @@ const KPIPage = ({
                   <input
                     type="number"
                     defaultValue={k.current}
-                    onBlur={e => updateCurrent(k.id, e.target.value)}
-                    style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 8px", color: T.text, fontSize: 12, outline: "none" }}
+                    onBlur={e => updateCurrent(k.id, e.target.value, e.target, k.current)}
+                    style={{ flex: 1, background: T.surface, border: `1px solid ${updateErrors[k.id] ? T.danger : T.border}`, borderRadius: 6, padding: "4px 8px", color: T.text, fontSize: 12, outline: "none" }}
                   />
+                </div>
+              )}
+              {updateErrors[k.id] && (
+                <div role="alert" style={{ color: T.danger, fontSize: 11, marginTop: 8 }}>
+                  {updateErrors[k.id]}
                 </div>
               )}
             </div>

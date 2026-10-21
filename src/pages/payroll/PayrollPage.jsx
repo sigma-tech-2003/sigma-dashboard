@@ -11,6 +11,8 @@ import Modal         from "../../components/modal/Modal";
 import Input         from "../../components/input/Input";
 import Select        from "../../components/select/Select";
 import Btn           from "../../components/btn/Btn";
+import FormFeedback from "../../components/form-feedback/FormFeedback";
+import { guardedSave } from "../../utils/saveErrors";
 import PayslipModal  from "./PayslipModal";
 import LoadErrorGate from "../../components/load-error/LoadErrorGate";
 
@@ -21,14 +23,23 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
   const [slip,   setSlip]   = useState(null);
   const [selEmp, setSelEmp] = useState("");
   const [form,   setForm]   = useState({ month: "April", year: 2025, bonus: 0, deductions: 0 });
+  const [processError, setProcessError] = useState("");   // shown inside the Process Payroll form
+  const [processing,   setProcessing]   = useState(false);
+  const [actionError,  setActionError]  = useState("");   // shown above the table (marking a draft processed)
+  const [marking,      setMarking]      = useState(false);
 
+  const openProcess = () => { setProcessError(""); setModal(true); };
+
+  // A failed save keeps the form open and says why; it never looks as if it worked.
   const process = async () => {
     const emp   = findRecordById(employees, selEmp);
-    if (!emp) return;
+    if (!emp || processing) return;
     const gross = emp.basic + emp.allowances + +form.bonus;
     const tax   = Math.round(calcTax(gross));
     const net   = gross - +form.deductions - tax;
-    await addPayroll({
+    setProcessing(true);
+    setProcessError("");
+    const result = await guardedSave(() => addPayroll({
       id:         Date.now(),
       empId:      emp.id,
       month:      form.month,
@@ -40,8 +51,22 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
       tax,
       net,
       status:     "processed",
-    });
+    }), { fallback: "The payroll record could not be saved. Please try again." });
+    setProcessing(false);
+    if (!result.ok) {
+      setProcessError(result.message);
+      return;
+    }
     setModal(false);
+  };
+
+  const markProcessed = async (record) => {
+    if (marking) return;
+    setMarking(true);
+    setActionError("");
+    const result = await guardedSave(() => updatePayrollStatus(record.id, "processed"), { fallback: "The payroll record could not be marked as processed. Please try again." });
+    setMarking(false);
+    if (!result.ok) setActionError(result.message);
   };
 
   // Preview calculation
@@ -60,8 +85,10 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
             {payroll.filter(p => p.status === "processed").length} processed · {payroll.filter(p => p.status === "draft").length} drafts
           </div>
         </div>
-        <Btn variant="outline" onClick={() => setModal(true)}><Plus size={14} />Process Payroll</Btn>
+        <Btn variant="outline" onClick={openProcess}><Plus size={14} />Process Payroll</Btn>
       </div>
+
+      {actionError && <div style={{ marginBottom: 16 }}><FormFeedback>{actionError}</FormFeedback></div>}
 
       {/* Summary stat cards */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
@@ -123,7 +150,8 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
                         </button>
                         {p.status === "draft" && (
                           <button
-                            onClick={() => updatePayrollStatus(p.id, "processed")}
+                            onClick={() => markProcessed(p)}
+                            disabled={marking}
                             style={{ background: T.successGlow, border: "none", color: T.success, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}>
                             <Check size={12} />
                           </button>
@@ -179,9 +207,11 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
             </div>
           )}
 
+          <FormFeedback>{processError}</FormFeedback>
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <Btn variant="ghost" onClick={() => setModal(false)}>Cancel</Btn>
-            <Btn onClick={process} disabled={!selEmp}><CreditCard size={13} />Process</Btn>
+            <Btn onClick={process} disabled={!selEmp || processing}><CreditCard size={13} />Process</Btn>
           </div>
         </Modal>
       )}

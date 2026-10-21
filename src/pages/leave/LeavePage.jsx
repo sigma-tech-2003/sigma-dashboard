@@ -12,10 +12,16 @@ import Modal       from "../../components/modal/Modal";
 import Input       from "../../components/input/Input";
 import Select      from "../../components/select/Select";
 import Btn         from "../../components/btn/Btn";
+import FormFeedback from "../../components/form-feedback/FormFeedback";
+import { guardedSave, leaveDatesError } from "../../utils/saveErrors";
 
 const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leaveBalances }) => {
   const [modal, setModal] = useState(false);
   const [form,  setForm]  = useState({ type: "Annual" });
+  const [applyError,    setApplyError]    = useState("");   // inside the Apply for Leave form
+  const [applying,      setApplying]      = useState(false);
+  const [decisionError, setDecisionError] = useState("");   // above the table (approve / reject)
+  const [deciding,      setDeciding]      = useState(false);
 
   const canApproveLeave = can(user, "approveLeave");
   // Admin/HR see all requests; manager sees their dept; tl sees their team;
@@ -25,9 +31,20 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
     : leaves.filter(l => l.empId === user.id);
   const myBal    = leaveBalances[user.id] || {};
 
+  const openApply = () => { setApplyError(""); setModal(true); };
+
+  // A failed request keeps the form open and says why; it never looks as if it was sent.
   const applyLeave = async () => {
+    if (applying) return;
+    const datesError = leaveDatesError(form.start, form.end);
+    if (datesError) {
+      setApplyError(datesError);
+      return;
+    }
     const days = Math.max(1, Math.round((new Date(form.end) - new Date(form.start)) / 86400000) + 1);
-    await addLeave({
+    setApplying(true);
+    setApplyError("");
+    const result = await guardedSave(() => addLeave({
       id:      Date.now(),
       empId:   user.id,
       type:    form.type,
@@ -37,9 +54,23 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
       reason:  form.reason,
       status:  "pending",
       applied: new Date().toISOString().split("T")[0],
-    });
+    }), { fallback: "The leave request could not be sent. Please try again." });
+    setApplying(false);
+    if (!result.ok) {
+      setApplyError(result.message);
+      return;
+    }
     setModal(false);
     setForm({ type: "Annual" });
+  };
+
+  const decide = async (id, status) => {
+    if (deciding) return;
+    setDeciding(true);
+    setDecisionError("");
+    const result = await guardedSave(() => updateLeaveStatus(id, status), { fallback: "The decision could not be saved. Please try again." });
+    setDeciding(false);
+    if (!result.ok) setDecisionError(result.message);
   };
 
   return (
@@ -51,9 +82,11 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
           <div style={{ fontSize: 12, color: T.muted }}>{canApproveLeave ? "All employee requests" : "Your leave overview"}</div>
         </div>
         {!canApproveLeave && (
-          <Btn onClick={() => setModal(true)}><Plus size={14} />Apply for Leave</Btn>
+          <Btn onClick={openApply}><Plus size={14} />Apply for Leave</Btn>
         )}
       </div>
+
+      {decisionError && <div style={{ marginBottom: 16 }}><FormFeedback>{decisionError}</FormFeedback></div>}
 
       {/* Employee: leave usage cards (D40: there are no entitlements, so only days taken) */}
       {!canApproveLeave && (
@@ -109,8 +142,8 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
                       <td style={{ padding: "12px 16px" }}>
                         {l.status === "pending" ? (
                           <div style={{ display: "flex", gap: 6 }}>
-                            <button onClick={() => updateLeaveStatus(l.id, "approved")} style={{ background: T.successGlow, border: "none", color: T.success, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><Check size={13} /></button>
-                            <button onClick={() => updateLeaveStatus(l.id, "rejected")} style={{ background: T.dangerGlow,  border: "none", color: T.danger,  padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><X    size={13} /></button>
+                            <button onClick={() => decide(l.id, "approved")} disabled={deciding} style={{ background: T.successGlow, border: "none", color: T.success, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><Check size={13} /></button>
+                            <button onClick={() => decide(l.id, "rejected")} disabled={deciding} style={{ background: T.dangerGlow,  border: "none", color: T.danger,  padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><X    size={13} /></button>
                           </div>
                         ) : <span style={{ fontSize: 11, color: T.muted }}>Done</span>}
                       </td>
@@ -149,9 +182,11 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
               style={{ width: "100%", background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: "9px 12px", color: T.text, fontSize: 13, outline: "none", resize: "vertical", fontFamily: "inherit" }}
             />
           </div>
+          <FormFeedback>{applyError}</FormFeedback>
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <Btn variant="ghost" onClick={() => setModal(false)}>Cancel</Btn>
-            <Btn onClick={applyLeave} disabled={!form.start || !form.end || !form.reason}>
+            <Btn onClick={applyLeave} disabled={!form.start || !form.end || !form.reason || applying}>
               <Check size={13} />Submit Request
             </Btn>
           </div>

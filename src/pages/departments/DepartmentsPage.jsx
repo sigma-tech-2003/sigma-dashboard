@@ -11,6 +11,8 @@ import Modal      from "../../components/modal/Modal";
 import Input      from "../../components/input/Input";
 import Select     from "../../components/select/Select";
 import Btn        from "../../components/btn/Btn";
+import FormFeedback from "../../components/form-feedback/FormFeedback";
+import { guardedSave } from "../../utils/saveErrors";
 
 const DepartmentsPage = ({
   user,
@@ -26,6 +28,7 @@ const DepartmentsPage = ({
   const [form,      setForm]      = useState({});
   const [saving,    setSaving]    = useState(false);
   const [deleteErr, setDeleteErr] = useState("");
+  const [saveError, setSaveError] = useState("");
 
   const isAdmin = user.role === "admin";
 
@@ -38,6 +41,13 @@ const DepartmentsPage = ({
   const viewManager  = selected ? getManager(selected.managerId) : null;
   const viewDeptEmps = selected ? employees.filter(e => e.dept === selected.name) : [];
 
+  // A department's manager must already work in it (the API refuses anyone else), so only its own people are offered.
+  // A new department has nobody yet; a manager is chosen once someone works in it.
+  const editedDepartmentName = departments.find(d => String(d.id) === String(form.id))?.name;
+  const managerChoices = modal === "edit"
+    ? employees.filter(e => e.status === "active" && e.dept === editedDepartmentName)
+    : [];
+
   // ── Filtered list ─────────────────────────────────────────────────
   const filtered = departments.filter(d =>
     (d.name        || "").toLowerCase().includes(search.toLowerCase()) ||
@@ -45,21 +55,25 @@ const DepartmentsPage = ({
   );
 
   // ── Handlers ─────────────────────────────────────────────────────
-  const openAdd  = ()     => { setForm({ status: "Active" }); setDeleteErr(""); setModal("add");  };
-  const openEdit = (dept) => { setForm({ ...dept });           setDeleteErr(""); setModal("edit"); };
+  const openAdd  = ()     => { setForm({ status: "Active" }); setDeleteErr(""); setSaveError(""); setModal("add");  };
+  const openEdit = (dept) => { setForm({ ...dept });           setDeleteErr(""); setSaveError(""); setModal("edit"); };
   const openView = (dept) => { setSelected(dept);                                setModal("view"); };
 
+  // A failed save keeps the form open and says why; it never looks as if it worked.
   const save = async () => {
-    if (!form.name?.trim()) return;
+    if (!form.name?.trim() || saving) return;
     setSaving(true);
-    try {
-      modal === "add"
-        ? await addDepartment(form)
-        : await updateDepartment(form.id, form);
-      setModal(null);
-    } finally {
-      setSaving(false);
+    setSaveError("");
+    const result = await guardedSave(
+      () => (modal === "add" ? addDepartment(form) : updateDepartment(form.id, form)),
+      { fallback: "The department could not be saved. Please try again." },
+    );
+    setSaving(false);
+    if (!result.ok) {
+      setSaveError(result.message);
+      return;
     }
+    setModal(null);
   };
 
   const del = async (dept) => {
@@ -71,8 +85,8 @@ const DepartmentsPage = ({
       return;
     }
     if (window.confirm(`Delete department "${dept.name}"?`)) {
-      await deleteDepartment(dept.id);
-      setDeleteErr("");
+      const result = await guardedSave(() => deleteDepartment(dept.id), { fallback: `"${dept.name}" could not be deleted. Please try again.` });
+      setDeleteErr(result.ok ? "" : result.message);
     }
   };
 
@@ -233,12 +247,12 @@ const DepartmentsPage = ({
             />
             <Select
               label="Manager"
+              hint={modal === "add" ? "Add the department first; a manager is chosen once someone works in it." : undefined}
               value={String(form.managerId || "")}
               onChange={e => setForm(p => ({ ...p, managerId: e.target.value }))}
             >
               <option value="">— Select Manager —</option>
-              {employees
-                .filter(e => e.status === "active")
+              {managerChoices
                 .map(e => (
                   <option key={e.id} value={e.id}>
                     {e.name} · {e.pos}
@@ -269,6 +283,8 @@ const DepartmentsPage = ({
             <option value="Active">Active</option>
             <option value="Inactive">Inactive</option>
           </Select>
+
+          <FormFeedback>{saveError}</FormFeedback>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
             <Btn variant="ghost" onClick={() => setModal(null)}>Cancel</Btn>
