@@ -2908,3 +2908,70 @@ none; a manager is chosen afterwards, once the department exists). A duplicate n
 "A department named … already exists." rather than in the server's own words. The department directory learns
 the new id on create, so the employee that follows can be created in it straight away; a department just
 created and selected stays selectable until the polled list includes it.
+
+### D43 — Editing your own record: contact details only — ✅ SETTLED
+
+**✅ SETTLED 2026-10-22 — everyone except an admin may change only their own phone number on their own employee
+record.** Found by a browser pass that tried every write as every role; fixed the same day, uncommitted when this was
+written.
+
+**What was found.** `assertCanUpdateEmployee` skipped the scope check whenever the person was editing their own record,
+so that a manager could change their own phone number. It also skipped everything else a scope check implies. A plain
+`employee` could `PATCH /employees/<own id>` and change their position, join date, **email** (the sign-in identity),
+team lead and **employment status** (they could deactivate themselves). Compensation and role were still refused, by the
+compensation gate and by `self_role_change_denied`. A department move was refused only by an unrelated reference check
+in the test, not by a rule. `hr` could also raise their own salary, which they cannot do for another hr.
+
+**Decision.** On your own record:
+- **Admin:** anything except the role, exactly as before (an admin may already change all of it on anyone else).
+- **Everyone else (hr, manager, tl, employee):** `phone` only. Any other field that actually differs from the stored
+  value is `403 self_edit_field_denied`, and the whole request is refused: nothing is half-applied.
+- **A value sent back unchanged is not a change**, so a client that echoes the record is not refused for it.
+- `self_role_change_denied` still comes first for a role change, for every role.
+- **Managing other people is untouched**: the role hierarchy, department and team scope and the compensation gate apply
+  as before.
+
+**Why `phone` and not more.** The reason the carve-out existed was contact details. Everything else on the record is
+controlled by HR and the management chain, and each of those fields feeds something else: `email` is how the person
+signs in, `employment_status` decides whether they can, `team_lead_id` and `department_id` decide who can see and
+manage them, and `basic` and `allowances` are their pay. Changing any of them on yourself is a request to HR, not a
+self-service edit. There is no self-service profile screen, so nothing in the UI loses a feature. Only admin and hr are shown an Edit
+control on their own row in Employees (manager, tl and employee have none), so the rule is reached through the screen
+only by hr, who can still change their phone and are told, in words, that the rest is not theirs to change; for
+everyone else it is the API that enforces it.
+
+**Consequence worth knowing.** `hr` can no longer change their own position or salary. Those now need an admin, which
+matches how another hr's record already behaves.
+
+**Tests.** Unit (every role against every field), route-level (`403` with nothing written), and `e2e-frontend-prereqs.js`
+against real PostgreSQL (the refused edits do not reach the row). Five deliberate regressions of the rule each fail the
+suite.
+
+**Not decided here.** Whether `full_name` should be self-editable (a person correcting a typo in their own name). It is
+not today, and is a one-line change to `SELF_EDITABLE_FIELDS` if wanted.
+
+### D44 — A save that fails must say so — ✅ SETTLED
+
+**✅ SETTLED 2026-10-22.** Four writes on three pages failed without telling anyone: setting a department manager from
+another department, processing a payroll month that already exists, and applying for leave over existing leave or with
+an end date before the start. Each was an awaited call with no `catch`, so the failure became an unhandled promise
+rejection, the modal stayed open and nothing on screen changed. A save that fails must never look as if it worked.
+
+**The convention.** Every page write goes through `guardedSave` (`src/utils/saveErrors.js`), which never throws and
+returns `{ ok, message }`; the page keeps the form open and shows the message. `describeSaveError` chooses the wording
+from the API's error **code** first (the server's own text sometimes names a field, for example
+`manager_employee_id must reference ...`), then the HTTP status, then the server's sentence for an unrecognised 400 or
+409, and a generic line for anything that is not an API answer. Raw error text from a non-API error is never shown.
+
+**Where it now applies** (the pages that had no handling): Departments (save, delete), Payroll (process, mark a draft
+processed), Leave (apply, approve, reject) and the KPI "Update" field, which also puts the number back to the saved value
+when the save fails so the screen never shows a figure that was not stored. Projects, KPI assign and rate, Attendance
+and Employees already reported their errors and are unchanged.
+
+**Two small prevention changes alongside.** Leave dates are checked before sending (end on or after start), so the
+commonest mistake is explained at once instead of coming back as a vague 400; and the Departments manager dropdown
+offers only people who already work in that department, since the API refuses anyone else.
+
+**Tests.** Message tests for every code, a `guardedSave` test that a failing write never rejects, and tests that each
+page still routes its writes through it. Twenty-two deliberate regressions (a bare await put back, an error no longer
+rendered, a code losing its message, the date check removed, the self-edit rule loosened) each fail the suite.
