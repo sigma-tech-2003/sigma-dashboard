@@ -1,7 +1,6 @@
 // src/pages/login-page/LoginPage.jsx
-// ✅ Now uses Firebase Auth (signInWithEmailAndPassword)
-//    No more local employees array check. No more onLogin / employees props.
-//    When login succeeds, App.jsx onAuthStateChanged fires automatically.
+// Signs in against the API (POST /auth/login), then checks the picked role (D37) before the session is published.
+// When that succeeds the session store changes and App.jsx swaps this page for the workspace on its own.
 
 import "./LoginPage.css";
 import { useRef, useState } from "react";
@@ -68,25 +67,25 @@ const LoginPage = () => {
     loginInFlight.current = true;
     setLoading(true);
     setErr("");
-    let firebaseUser = null;
+    let signedInUser = null;
 
     try {
       sessionStorage.setItem(AUTH_ROLE_STORAGE_KEY, selectedRole);
       sessionStorage.removeItem(AUTH_ROLE_ERROR_STORAGE_KEY);
       const credential = await signIn(email, pass);
-      firebaseUser = credential.user;
+      signedInUser = credential.user;
       const principal = await verifyAuthSession(selectedRole);
       if (principal?.linkage !== "uid" || !principal.employee) {
         throw new AuthSessionError("data-integrity");
       }
 
-      // ✅ App.jsx onAuthStateChanged will detect this login and set the user.
+      // The session store publishes the user and App.jsx takes over from here.
       // No manual state update needed here.
     } catch (error) {
       const safeMessage = error instanceof AuthSessionError
         ? error.message
         : SIGN_IN_FAILURE_MESSAGE;
-      const signOutPromise = firebaseUser
+      const signOutPromise = signedInUser
         ? attemptSignOut()
         : Promise.resolve();
 

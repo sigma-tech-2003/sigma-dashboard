@@ -620,6 +620,17 @@ deleted, until at least one full payroll cycle has run on Postgres.
 > check for un-migrated data. The soak period above still applies for verifying the new
 > Postgres-only system is stable before Firebase is deleted, just not for data preservation.
 
+> **Done 2026-10-21 (the code, not the Firebase project).** Deleted `functions/`, `firestore.rules`,
+> `firebase.json` and `src/firebase/`, and removed the `firebase` dependency (`seedFirestore.js` had already
+> gone). The prerequisite above was real: `src/firebase/` still held the data layer, so `useFirestore.js` and
+> `useDepartments.js` were first moved to `src/hooks/` as `useCollections.js` and `useDepartments.js` (hook
+> names unchanged, only `App.jsx`'s two imports changed), and a search then showed nothing in `src/` importing
+> the directory. There was no root `.env` carrying `VITE_FIREBASE_*`. **Not done, on purpose:** `firebase-admin`
+> stays in `backend/` for `export-firestore.js` and `parity-harness.js`; the Firebase project itself and anything
+> already deployed to it (functions, rules) are untouched and keep running until removed there; and backend
+> comments that cite `functions/` or `firestore.rules` line numbers now point at files that exist only in git
+> history. The soak and payroll-cycle conditions above could not be checked from the repository.
+
 ---
 
 ## Phase 12 — Announcements (deferred, not cancelled)

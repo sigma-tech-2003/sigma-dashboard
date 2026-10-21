@@ -1,5 +1,5 @@
-import { useCollectionAccess } from "./useFirestore.js";
-import { useCollectionResource } from "../hooks/useCollectionResource";
+import { useCollectionAccess } from "./useCollections.js";
+import { useCollectionResource } from "./useCollectionResource";
 import { departmentService } from "../services/departmentService.js";
 
 // Only admin and hr can read the departments list (D33). Everyone else learns department names from the

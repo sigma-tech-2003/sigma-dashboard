@@ -1,12 +1,11 @@
 import { api as defaultApi } from "./apiClient.js";
 
-// The auth endpoints (D32, D37, D41), over the one API client. This replaces authService.js and
-// authSessionService.js at cutover; both stay in place, untouched, until then.
+// The auth endpoints (D32, D37, D41), over the one API client. authService.js and authSessionService.js are the
+// sign-in surface LoginPage imports, and both sit on top of the session built from this.
 
 /**
- * Sign-in and session errors, with the SAME message text the Firebase flow's AuthSessionError showed, so the
- * login page reads identically. A separate class because authSessionService.js builds an httpsCallable at import
- * time and would pull Firebase into anything that imported it. Temporary duplication: Phase 11 deletes the old one.
+ * Sign-in and session errors, with the message text the login page has always shown. authSessionService.js
+ * re-exports this class as AuthSessionError.
  */
 const ERROR_MESSAGES = Object.freeze({
   unauthenticated: "Your session has expired. Please sign in and try again.",

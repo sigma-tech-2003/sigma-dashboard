@@ -8,7 +8,7 @@ import {
   getDefaultRoute,
   getRouteById,
 } from "./config/routes";
-import { useDepartments } from "./firebase/useDepartments";
+import { useDepartments } from "./hooks/useDepartments";
 import {
   useAttendance,
   useEmployees,
@@ -17,7 +17,7 @@ import {
   useLeaves,
   usePayroll,
   useProjects,
-} from "./firebase/useFirestore";
+} from "./hooks/useCollections";
 import { useHashNavigation } from "./hooks/useHashNavigation";
 import { useScopedWorkspace } from "./hooks/useScopedWorkspace";
 import LoginPage from "./pages/login-page/LoginPage";
@@ -246,7 +246,7 @@ function AppContent() {
   const principal = useMemo(() => verifiedPrincipalFromUser(user), [user]);
 
   if (seeding) return <LoadingScreen message="Setting up your database…" />;
-  if (!authReady) return <LoadingScreen message="Connecting to Firebase…" />;
+  if (!authReady) return <LoadingScreen message="Loading…" />;
   if (!principal) return <LoginPage />;
   // D41: a temporary password must be replaced before anything else. Nothing of the workspace mounts (so nothing
   // polls and nothing is refused); the server enforces the same rule on every request.

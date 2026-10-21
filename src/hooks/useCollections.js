@@ -3,7 +3,7 @@ import { useAuth } from "../auth/useAuth.js";
 import {
   useCollectionResource,
   withCollectionSubscription,
-} from "../hooks/useCollectionResource";
+} from "./useCollectionResource";
 import { attendanceService } from "../services/attendanceService.js";
 import { employeeService } from "../services/employeeService.js";
 import {
@@ -30,10 +30,8 @@ import {
 } from "../services/projectMutationService.js";
 import { projectService } from "../services/projectService.js";
 
-// The app's data layer. The file keeps its Firebase-era name and location so App.jsx's import is unchanged; every
-// hook returns exactly the shape it did under Firestore, but reads through the API (polled, services/polling.js)
-// and writes through the domain services. Migration-plan Phase 10 item 1 moves it to src/hooks/ with the
-// App.jsx import change, once the Firebase code goes (Phase 11).
+// The app's data layer. Every hook returns the shape the pages have always consumed, but reads through the API
+// (polled, services/polling.js) and writes through the domain services.
 //
 // There are no per-role read plans any more: the API scopes every read server-side, so a hook only declines to
 // ask for what the API would answer with nothing (payroll for a manager, the departments list for a non-admin).
