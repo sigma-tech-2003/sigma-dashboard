@@ -1,43 +1,70 @@
+/* The one stat card: sentence-case label, a large figure, a quiet sub-line. No hover colour shift. */
 .stat {
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  padding: var(--space-8) 22px;
   flex: 1;
   min-width: 160px;
-  transition: all var(--transition-base);
-  cursor: default;
-  box-shadow: var(--shadow-card);
+  padding: var(--card-pad);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-card);
 }
 
 .stat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-6);
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .stat-label {
+  color: var(--color-muted-light);
   font-size: var(--font-size-sm);
-  color: var(--color-muted);
-  font-weight: var(--font-weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  font-weight: var(--font-weight-medium);
 }
 
 .stat-icon {
-  padding: var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
   border-radius: var(--radius-md);
 }
 
 .stat-value {
-  font-size: var(--font-size-4xl);
-  font-weight: var(--font-weight-extrabold);
   color: var(--color-text);
-  margin-bottom: var(--space-1);
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-sub {
-  font-size: var(--font-size-xs);
+  margin-top: var(--space-2);
   color: var(--color-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* A row of stat cards: as many as fit at 220px, one per line on a phone */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--space-6);
+  margin-bottom: var(--space-9);
+}
+
+/* Short figures (day counts, headcounts) fit two to a row on a phone */
+.stat-grid--compact {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+}
+
+@media (max-width: 639px) {
+  .stat-grid--compact .stat {
+    padding: var(--space-5);
+  }
+
+  .stat-grid--compact .stat-value {
+    font-size: var(--font-size-3xl);
+  }
 }

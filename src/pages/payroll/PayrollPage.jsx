@@ -1,24 +1,32 @@
 // src/pages/payroll/PayrollPage.jsx
 import { useState } from "react";
-import { Plus, Check, FileText, CreditCard } from "lucide-react";
+import { Plus, Check, FileText, CreditCard, Wallet, Receipt, Landmark, Gift, Banknote } from "lucide-react";
 
+import "./Payroll.css";
 import { T } from "../../theme/theme";
 import { fmt, calcTax } from "../../utils/helpers";
 import { findRecordById } from "../../services/legacyShape";
 import Badge         from "../../components/badge/Badge";
-import Avatar        from "../../components/avatar/Avatar";
+import PersonCell    from "../../components/person-cell/PersonCell";
+import PageHeader    from "../../components/page-header/PageHeader";
+import Stat          from "../../components/stat/Stat";
+import DataTable     from "../../components/data-table/DataTable";
+import EmptyState    from "../../components/empty-state/EmptyState";
+import IconButton    from "../../components/icon-button/IconButton";
 import Modal         from "../../components/modal/Modal";
 import Input         from "../../components/input/Input";
 import Select        from "../../components/select/Select";
 import Btn           from "../../components/btn/Btn";
 import FormFeedback from "../../components/form-feedback/FormFeedback";
 import { guardedSave } from "../../utils/saveErrors";
+import { useToast } from "../../components/toast/toastContext";
 import PayslipModal  from "./PayslipModal";
 import LoadErrorGate from "../../components/load-error/LoadErrorGate";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employees }) => {
+  const toast = useToast();
   const [modal,  setModal]  = useState(false);
   const [slip,   setSlip]   = useState(null);
   const [selEmp, setSelEmp] = useState("");
@@ -58,6 +66,7 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
       return;
     }
     setModal(false);
+    toast.success("Payroll processed");
   };
 
   const markProcessed = async (record) => {
@@ -67,6 +76,7 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
     const result = await guardedSave(() => updatePayrollStatus(record.id, "processed"), { fallback: "The payroll record could not be marked as processed. Please try again." });
     setMarking(false);
     if (!result.ok) setActionError(result.message);
+    else toast.success("Payroll marked as processed");
   };
 
   // Preview calculation
@@ -75,143 +85,123 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
   const previewTax   = previewEmp ? Math.round(calcTax(previewGross)) : 0;
   const previewNet   = previewEmp ? previewGross - +form.deductions - previewTax : 0;
 
+  const totals = [
+    { label: "Gross payroll", value: fmt(payroll.reduce((s, p) => s + (p.basic + p.allowances + p.bonus), 0)), icon: Banknote, color: T.primaryText },
+    { label: "Total tax",     value: fmt(payroll.reduce((s, p) => s + p.tax, 0)),                              icon: Landmark, color: T.danger },
+    { label: "Net disbursed", value: fmt(payroll.reduce((s, p) => s + p.net, 0)),                              icon: Wallet,   color: T.success },
+    { label: "Total bonuses", value: fmt(payroll.reduce((s, p) => s + p.bonus, 0)),                            icon: Gift,     color: T.warning },
+  ];
+  const processedCount = payroll.filter(p => p.status === "processed").length;
+  const draftCount     = payroll.filter(p => p.status === "draft").length;
+
   return (
     <div>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>Payroll</div>
-          <div style={{ fontSize: 12, color: T.muted }}>
-            {payroll.filter(p => p.status === "processed").length} processed · {payroll.filter(p => p.status === "draft").length} drafts
-          </div>
-        </div>
-        <Btn variant="outline" onClick={openProcess}><Plus size={14} />Process Payroll</Btn>
-      </div>
+      <PageHeader
+        title="Payroll"
+        description={`${processedCount} processed · ${draftCount} ${draftCount === 1 ? "draft" : "drafts"}`}
+        actions={<Btn onClick={openProcess}><Plus size={16} aria-hidden="true" />Process payroll</Btn>}
+      />
 
       {actionError && <div style={{ marginBottom: 16 }}><FormFeedback>{actionError}</FormFeedback></div>}
 
-      {/* Summary stat cards */}
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        {[
-          { label: "Gross Payroll", val: fmt(payroll.reduce((s, p) => s + (p.basic + p.allowances + p.bonus), 0)), color: T.primary },
-          { label: "Total Tax",     val: fmt(payroll.reduce((s, p) => s + p.tax, 0)),                              color: T.danger  },
-          { label: "Net Disbursed", val: fmt(payroll.reduce((s, p) => s + p.net, 0)),                              color: T.success },
-          { label: "Total Bonuses", val: fmt(payroll.reduce((s, p) => s + p.bonus, 0)),                            color: T.warning },
-        ].map(s => (
-          <div key={s.label} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "16px 20px", flex: "1 1 160px", minWidth: 150 }}>
-            <div style={{ fontSize: 11, color: T.muted, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>{s.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: s.color }}>{s.val}</div>
-          </div>
-        ))}
+      <div className="stat-grid">
+        {totals.map(s => <Stat key={s.label} label={s.label} value={s.value} icon={s.icon} color={s.color} />)}
       </div>
 
-      {/* Table */}
-      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table className="data-table">
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                {["Employee","Period","Basic","Allowances","Bonus","Deductions","Tax","Net Pay","Status","Action"].map(h => (
-                  <th key={h} style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: 0.8, whiteSpace: "nowrap" }}>{h}</th>
-                ))}
+      <DataTable
+        label="Payroll records"
+        empty={payroll.length === 0 ? (
+          <EmptyState icon={Receipt} title="No payroll processed yet" description="Process payroll for an employee and the record, with its payslip, will be listed here.">
+            <Btn onClick={openProcess}><Plus size={16} aria-hidden="true" />Process payroll</Btn>
+          </EmptyState>
+        ) : null}
+      >
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Period</th>
+            <th className="cell-number">Basic</th>
+            <th className="cell-number">Allowances</th>
+            <th className="cell-number">Bonus</th>
+            <th className="cell-number">Deductions</th>
+            <th className="cell-number">Tax</th>
+            <th className="cell-number">Net pay</th>
+            <th>Status</th>
+            <th><span className="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {payroll.map(p => {
+            const emp = employees.find(e => e.id === p.empId);
+            return (
+              <tr key={p.id}>
+                <td data-primary><PersonCell emp={emp} sub={emp?.dept} /></td>
+                <td data-label="Period" style={{ whiteSpace: "nowrap" }}>{p.month} {p.year}</td>
+                <td data-label="Basic" className="cell-number">{fmt(p.basic)}</td>
+                <td data-label="Allowances" className="cell-number">{fmt(p.allowances)}</td>
+                <td data-label="Bonus" className="cell-number" style={{ color: p.bonus ? T.success : T.muted }}>{fmt(p.bonus)}</td>
+                <td data-label="Deductions" className="cell-number" style={{ color: p.deductions ? T.text : T.muted }}>{fmt(p.deductions)}</td>
+                <td data-label="Tax" className="cell-number">{fmt(p.tax)}</td>
+                <td data-label="Net pay" className="cell-number" style={{ fontWeight: 600 }}>{fmt(p.net)}</td>
+                <td data-label="Status"><Badge s={p.status} /></td>
+                <td className="cell-actions">
+                  <div className="row-actions">
+                    <IconButton icon={FileText} label={`View payslip for ${emp?.name || "employee"}`} onClick={() => setSlip({ ...p, emp })} />
+                    {p.status === "draft" && (
+                      <IconButton icon={Check} label={`Mark ${emp?.name || "employee"}'s payroll as processed`} onClick={() => markProcessed(p)} disabled={marking} />
+                    )}
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {payroll.map(p => {
-                const emp = employees.find(e => e.id === p.empId);
-                return (
-                  <tr key={p.id}
-                    style={{ borderBottom: `1px solid ${T.border}`, transition: "background .15s" }}
-                    onMouseEnter={e => (e.currentTarget.style.background = T.cardHover)}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                    <td style={{ padding: "11px 14px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        {emp && <Avatar emp={emp} size={28} />}
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: T.text }}>{emp?.name}</div>
-                          <div style={{ fontSize: 10, color: T.muted }}>{emp?.dept}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: "11px 14px", fontSize: 12, color: T.mutedLight, whiteSpace: "nowrap" }}>{p.month} {p.year}</td>
-                    <td style={{ padding: "11px 14px", fontSize: 12, color: T.text }}>{fmt(p.basic)}</td>
-                    <td style={{ padding: "11px 14px", fontSize: 12, color: T.text }}>{fmt(p.allowances)}</td>
-                    <td style={{ padding: "11px 14px", fontSize: 12, color: p.bonus      ? T.success : T.muted }}>{fmt(p.bonus)}</td>
-                    <td style={{ padding: "11px 14px", fontSize: 12, color: p.deductions ? T.danger  : T.muted }}>{fmt(p.deductions)}</td>
-                    <td style={{ padding: "11px 14px", fontSize: 12, color: T.danger }}>{fmt(p.tax)}</td>
-                    <td style={{ padding: "11px 14px", fontSize: 12, fontWeight: 800, color: T.success }}>{fmt(p.net)}</td>
-                    <td style={{ padding: "11px 14px" }}><Badge s={p.status} /></td>
-                    <td style={{ padding: "11px 14px" }}>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button
-                          onClick={() => setSlip({ ...p, emp })}
-                          style={{ background: T.primaryGlow, border: "none", color: T.primary, padding: "5px 8px", borderRadius: 6, cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
-                          <FileText size={12} />Slip
-                        </button>
-                        {p.status === "draft" && (
-                          <button
-                            onClick={() => markProcessed(p)}
-                            disabled={marking}
-                            style={{ background: T.successGlow, border: "none", color: T.success, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}>
-                            <Check size={12} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            );
+          })}
+        </tbody>
+      </DataTable>
 
-      {/* Process Payroll Modal */}
       {modal && (
-        <Modal title="Process Payroll" onClose={() => setModal(false)}>
-          <Select label="Select Employee" value={selEmp} onChange={e => setSelEmp(e.target.value)}>
-            <option value="">Choose employee…</option>
+        <Modal title="Process payroll" onClose={() => setModal(false)}>
+          <Select label="Employee" value={selEmp} onChange={e => setSelEmp(e.target.value)}>
+            <option value="">Choose an employee…</option>
             {employees.filter(e => e.role === "employee").map(e => (
               <option key={e.id} value={e.id}>{e.name} — {e.pos}</option>
             ))}
           </Select>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+          <div className="form-grid">
             <Select label="Month" value={form.month} onChange={e => setForm(p => ({ ...p, month: e.target.value }))}>
               {MONTHS.map(m => <option key={m}>{m}</option>)}
             </Select>
-            <Input label="Year"             value={form.year}       onChange={e => setForm(p => ({ ...p, year:       e.target.value }))} type="number" />
-            <Input label="Bonus (PKR)"      value={form.bonus}      onChange={e => setForm(p => ({ ...p, bonus:      e.target.value }))} type="number" />
-            <Input label="Deductions (PKR)" value={form.deductions} onChange={e => setForm(p => ({ ...p, deductions: e.target.value }))} type="number" />
+            <Input label="Year"             value={form.year}       onChange={e => setForm(p => ({ ...p, year:       e.target.value }))} type="number" inputMode="numeric" />
+            <Input label="Bonus (PKR)"      value={form.bonus}      onChange={e => setForm(p => ({ ...p, bonus:      e.target.value }))} type="number" inputMode="numeric" />
+            <Input label="Deductions (PKR)" value={form.deductions} onChange={e => setForm(p => ({ ...p, deductions: e.target.value }))} type="number" inputMode="numeric" />
           </div>
 
-          {/* Preview */}
           {previewEmp && (
-            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 14, marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: T.muted, fontWeight: 700, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Payroll Preview</div>
+            <div className="payroll-preview">
+              <div className="payroll-preview__title">Payroll preview</div>
               {[
-                ["Basic Salary", fmt(previewEmp.basic),        T.text],
+                ["Basic salary", fmt(previewEmp.basic),        T.text],
                 ["Allowances",   fmt(previewEmp.allowances),   T.text],
-                ["Bonus",        fmt(+form.bonus),              T.success],
-                ["Deductions",   `-${fmt(+form.deductions)}`,  T.danger],
-                ["Income Tax",   `-${fmt(previewTax)}`,        T.danger],
+                ["Bonus",        fmt(+form.bonus),             T.success],
+                ["Deductions",   `-${fmt(+form.deductions)}`,  T.text],
+                ["Income tax",   `-${fmt(previewTax)}`,        T.text],
               ].map(([k, v, c]) => (
-                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: `1px solid ${T.border}` }}>
-                  <span style={{ fontSize: 12, color: T.muted }}>{k}</span>
-                  <span style={{ fontSize: 12, color: c, fontWeight: 600 }}>{v}</span>
+                <div key={k} className="payroll-preview__row">
+                  <span>{k}</span>
+                  <span style={{ color: c }}>{v}</span>
                 </div>
               ))}
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", marginTop: 4 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Net Pay</span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: T.success }}>{fmt(previewNet)}</span>
+              <div className="payroll-preview__net">
+                <span>Net pay</span>
+                <span>{fmt(previewNet)}</span>
               </div>
             </div>
           )}
 
           <FormFeedback>{processError}</FormFeedback>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <div className="modal-actions">
             <Btn variant="ghost" onClick={() => setModal(false)}>Cancel</Btn>
-            <Btn onClick={process} disabled={!selEmp || processing}><CreditCard size={13} />Process</Btn>
+            <Btn onClick={process} disabled={!selEmp || processing}><CreditCard size={16} aria-hidden="true" />{processing ? "Processing…" : "Process"}</Btn>
           </div>
         </Modal>
       )}

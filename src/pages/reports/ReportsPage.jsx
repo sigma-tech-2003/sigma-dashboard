@@ -1,3 +1,4 @@
+import "./Reports.css";
 import {
   CheckCircle2,
   Clock3,
@@ -60,12 +61,12 @@ const DistributionCard = ({ title, rows, total, emptyMessage }) => (
     {rows.length === 0 ? (
       <EmptyState title={emptyMessage} description="No scoped records are available for this report." />
     ) : rows.map(({ status, count }) => (
-      <div key={status} style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
+      <div key={status} className="report-bar">
+        <div className="report-bar__head">
           <Badge s={status} />
-          <span style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{count}</span>
+          <span className="report-bar__count">{count}</span>
         </div>
-        <ProgressBar value={count} max={total || 1} color={T.primary} />
+        <ProgressBar value={count} max={total || 1} color={T.primary} label={`${title}: ${status}`} />
       </div>
     ))}
   </Card>
@@ -168,136 +169,125 @@ const ReportsPageContent = ({
       key: `${activity.type}-${activity.sourceId ?? "record"}-${index}`,
     }));
 
-  const headerCellStyle = {
-    padding: "12px 16px",
-    color: T.muted,
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: 0.8,
-    textAlign: "left",
-    textTransform: "uppercase",
-    whiteSpace: "nowrap",
-  };
-  const cellStyle = {
-    padding: "14px 16px",
-    color: T.mutedLight,
-    fontSize: 13,
-  };
-
   return (
     <div>
       <PageHeader
         title="Reports"
-        description="Read-only workforce, project, leave, KPI, and operational insights for your scope."
+        description="Read-only workforce, project, leave and KPI figures for your scope"
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14, marginBottom: 20 }}>
-        <Stat icon={Users} label="Scoped Employees" value={scopedEmployees.length} sub="Visible in your role scope" color={T.primary} />
-        <Stat icon={UserCheck} label="Active Employees" value={activeEmployees.length} sub={`${scopedEmployees.length - activeEmployees.length} not active`} color={T.success} />
-        <Stat icon={FolderKanban} label="Visible Projects" value={scopedProjects.length} sub="Authorized project scope" color={T.secondary} />
-        <Stat icon={Clock3} label="Pending Leaves" value={pendingLeaves.length} sub="Awaiting review" color={T.warning} />
-        <Stat icon={CheckCircle2} label="Approved Leaves" value={approvedLeaves.length} sub="Approved requests" color={T.success} />
-        <Stat icon={XCircle} label="Rejected Leaves" value={rejectedLeaves.length} sub="Rejected requests" color={T.danger} />
+      <div className="stat-grid stat-grid--compact" data-reveal>
+        <Stat icon={Users} label="Employees in scope" value={scopedEmployees.length} sub="Visible in your role scope" color={T.primaryText} />
+        <Stat icon={UserCheck} label="Active employees" value={activeEmployees.length} sub={`${scopedEmployees.length - activeEmployees.length} not active`} color={T.success} />
+        <Stat icon={FolderKanban} label="Visible projects" value={scopedProjects.length} sub="Authorized project scope" color={T.secondary} />
+        <Stat icon={Clock3} label="Pending leaves" value={pendingLeaves.length} sub="Awaiting review" color={T.warning} />
+        <Stat icon={CheckCircle2} label="Approved leaves" value={approvedLeaves.length} sub="Approved requests" color={T.success} />
+        <Stat icon={XCircle} label="Rejected leaves" value={rejectedLeaves.length} sub="Rejected requests" color={T.danger} />
         <Stat
           icon={Target}
-          label="KPI Rating Average"
-          value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+          label="KPI rating average"
+          value={ratingSummary.average === null ? "Not rated" : `${ratingSummary.average}/10`}
           sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} scoped KPIs rated`}
           color={T.purple}
         />
         <Stat
           icon={TrendingUp}
-          label="Average KPI Completion"
-          value={averageCompletion === null ? "No Data" : `${averageCompletion}%`}
+          label="Average KPI completion"
+          value={averageCompletion === null ? "No data" : `${averageCompletion}%`}
           sub={`${completionValues.length}/${scopedKpis.length} KPIs with usable progress`}
           color={T.secondary}
         />
         {canViewPayroll && (
-          <Stat icon={DollarSign} label="Total Payroll" value={fmt(totalPayroll)} sub="Net value from scoped records" color={T.success} />
+          <Stat icon={DollarSign} label="Total payroll" value={fmt(totalPayroll)} sub="Net value from scoped records" color={T.success} />
         )}
         {canViewPayroll && (
-          <Stat icon={ReceiptText} label="Payslip Count" value={scopedPayroll.length} sub="Scoped payroll records" color={T.primary} />
+          <Stat icon={ReceiptText} label="Payslips" value={scopedPayroll.length} sub="Scoped payroll records" color={T.primaryText} />
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 16 }}>
+      <div className="report-grid" data-reveal>
         <DistributionCard
-          title="Employee Status Distribution"
+          title="Employees by status"
           rows={employeeStatuses}
           total={scopedEmployees.length}
           emptyMessage="No employee status data"
         />
         <DistributionCard
-          title="Project Status Distribution"
+          title="Projects by status"
           rows={projectStatuses}
           total={scopedProjects.length}
           emptyMessage="No project status data"
         />
         <DistributionCard
-          title="Leave Status"
+          title="Leaves by status"
           rows={leaveStatuses}
           total={scopedLeaves.length}
           emptyMessage="No leave status data"
         />
       </div>
 
-      <div style={{ marginBottom: 16 }}>
-        <Card title="KPI Rating Summary" right={<FileChartColumn size={16} color={T.muted} />}>
+      <div className="report-section" data-reveal>
+        <Card title="KPI rating summary" right={<FileChartColumn size={16} color={T.muted} aria-hidden="true" />}>
           {scopedKpis.length === 0 ? (
-            <EmptyState title="No KPI records available" description="There are no KPI records in your current report scope." />
+            <EmptyState title="No KPI records" description="There are no KPI records in your current report scope." />
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 18, alignItems: "center" }}>
+            <div className="report-kpi">
               <div>
-                <div style={{ color: T.muted, fontSize: 11, marginBottom: 6 }}>Valid rating average</div>
-                <div style={{ color: T.text, fontSize: 26, fontWeight: 800 }}>
-                  {ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+                <div className="report-kpi__label">Valid rating average</div>
+                <div className="report-kpi__value">
+                  {ratingSummary.average === null ? "Not rated" : `${ratingSummary.average}/10`}
                 </div>
-                <div style={{ color: T.muted, fontSize: 12, marginTop: 5 }}>
+                <div className="report-kpi__sub">
                   {ratingSummary.ratedCount} rated of {ratingSummary.totalCount} visible KPIs
                 </div>
               </div>
               <div>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 7 }}>
-                  <span style={{ color: T.muted, fontSize: 12 }}>Target/current completion</span>
-                  <span style={{ color: T.text, fontSize: 12, fontWeight: 700 }}>
-                    {averageCompletion === null ? "No Data" : `${averageCompletion}%`}
+                <div className="report-kpi__row">
+                  <span className="report-kpi__label">Target/current completion</span>
+                  <span className="report-kpi__figure">
+                    {averageCompletion === null ? "No data" : `${averageCompletion}%`}
                   </span>
                 </div>
                 {averageCompletion === null
                   ? <EmptyState title="No usable KPI progress" description="Valid target and current values are not available." />
-                  : <ProgressBar value={averageCompletion} max={100} color={T.secondary} />}
+                  : <ProgressBar value={averageCompletion} max={100} color={T.secondary} label="Average KPI completion" />}
               </div>
             </div>
           )}
         </Card>
       </div>
 
-      <Card title="Recent Scoped Activity">
-        {recentActivity.length === 0 ? (
-          <EmptyState title="No recent activity" description="No dated employee, project, leave, or KPI records are available in your scope." />
-        ) : (
-          <DataTable>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                {["Date", "Activity", "Subject", "Details", "Status"].map((heading) => (
-                  <th key={heading} style={headerCellStyle}>{heading}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {recentActivity.map((activity) => (
-                <tr key={activity.key} style={{ borderBottom: `1px solid ${T.border}` }}>
-                  <td style={{ ...cellStyle, whiteSpace: "nowrap" }}>{fdate(activity.date)}</td>
-                  <td style={{ ...cellStyle, color: T.text, fontWeight: 700 }}>{activity.type}</td>
-                  <td style={{ ...cellStyle, color: T.text }}>{activity.subject}</td>
-                  <td style={cellStyle}>{activity.detail}</td>
-                  <td style={cellStyle}><Badge s={activity.status} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </DataTable>
-        )}
-      </Card>
+      <div className="section-head">
+        <h2>Recent activity in your scope</h2>
+      </div>
+
+      <DataTable
+        label="Recent activity"
+        empty={recentActivity.length === 0 ? (
+          <EmptyState title="No recent activity" description="No dated employee, project, leave or KPI records are available in your scope." />
+        ) : null}
+      >
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Activity</th>
+            <th>Subject</th>
+            <th>Details</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {recentActivity.map((activity) => (
+            <tr key={activity.key}>
+              <td data-label="Date" style={{ whiteSpace: "nowrap", color: T.mutedLight }}>{fdate(activity.date)}</td>
+              <td data-label="Activity">{activity.type}</td>
+              <td data-primary style={{ fontWeight: 500 }}>{activity.subject}</td>
+              <td data-label="Details" style={{ color: T.mutedLight }}>{activity.detail}</td>
+              <td data-label="Status"><Badge s={activity.status} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </DataTable>
     </div>
   );
 };

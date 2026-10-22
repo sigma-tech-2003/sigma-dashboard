@@ -1,5 +1,4 @@
-import "./FormField.css";
-import "./FieldHelp.css";
+import "./Field.css";
 
 const FormField = ({ id, label, hint, error, children, className = "" }) => (
   <div className={"form-field " + className}>

@@ -2,6 +2,7 @@
 import { useRef, useState } from "react";
 import { Plus, Check, Target } from "lucide-react";
 
+import "./Kpi.css";
 import { T } from "../../theme/theme";
 import {
   getProjectKpiRatingLabel,
@@ -20,10 +21,13 @@ import {
   scopeProjectKpis,
   scopeProjects,
 } from "../../utils/permissions";
-import Avatar      from "../../components/avatar/Avatar";
+import PersonCell  from "../../components/person-cell/PersonCell";
+import PageHeader  from "../../components/page-header/PageHeader";
+import FilterBar   from "../../components/filter-bar/FilterBar";
 import EmptyState  from "../../components/empty-state/EmptyState";
 import FormFeedback from "../../components/form-feedback/FormFeedback";
 import { guardedSave } from "../../utils/saveErrors";
+import { useToast } from "../../components/toast/toastContext";
 import Modal       from "../../components/modal/Modal";
 import Input       from "../../components/input/Input";
 import Select      from "../../components/select/Select";
@@ -55,6 +59,7 @@ const KPIPage = ({
   projects = [],
   user,
 }) => {
+  const toast = useToast();
   const [modal,  setModal]  = useState(false);
   const [form,   setForm]   = useState(INITIAL_KPI_FORM);
   const [selEmp, setSelEmp] = useState("all");
@@ -200,6 +205,7 @@ const KPIPage = ({
       setModal(false);
       setForm(INITIAL_KPI_FORM);
       setErrors({});
+      toast.success("KPI assigned");
     } catch (error) {
       setSubmitError(error?.message || "Unable to assign the KPI. Please try again.");
     } finally {
@@ -217,6 +223,8 @@ const KPIPage = ({
     if (!result.ok) {
       setUpdateErrors((current) => ({ ...current, [id]: result.message }));
       if (input) input.value = String(storedValue ?? "");
+    } else {
+      toast.success("Progress saved");
     }
   };
 
@@ -280,6 +288,7 @@ const KPIPage = ({
         ratedBy: String(user.id),
         ratedAt: new Date().toISOString(),
       });
+      toast.success("Rating saved");
     } catch (error) {
       setRatingErrors((currentErrors) => ({
         ...currentErrors,
@@ -293,34 +302,23 @@ const KPIPage = ({
 
   return (
     <div>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>KPI Tracker</div>
-          <div style={{ fontSize: 12, color: T.muted }}>Performance indicators & scoring — Q1 2025</div>
-        </div>
-        {canManageKpis && (
-          <Btn onClick={openModal}>
-            <Plus size={14} />Assign KPI
-          </Btn>
-        )}
-      </div>
+      <PageHeader
+        title="KPIs"
+        description="Performance indicators and scoring"
+        actions={canManageKpis ? (
+          <Btn onClick={openModal}><Plus size={16} aria-hidden="true" />Assign KPI</Btn>
+        ) : null}
+      />
 
       {/* KPI summary cards */}
-      {canManageKpis && (
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+      {canManageKpis && empKpiSummary.length > 0 && (
+        <div className="kpi-summary" data-reveal>
           {empKpiSummary.map(s => (
-            <div key={s.emp.id} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, minWidth: 180, flex: "1 1 180px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <Avatar emp={s.emp} size={32} />
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: T.text }}>{s.emp.name.split(" ")[0]}</div>
-                  <div style={{ fontSize: 10, color: T.muted }}>{s.emp.dept}</div>
-                </div>
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: perfColor(s.score) }}>{s.score}%</div>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>{s.label}</div>
-              <ProgressBar value={s.score} color={perfColor(s.score)} h={4} />
+            <div key={s.emp.id} className="kpi-summary__card">
+              <PersonCell emp={s.emp} sub={s.emp.dept} />
+              <div className="kpi-summary__score" style={{ color: perfColor(s.score) }}>{s.score}%</div>
+              <div className="kpi-summary__label">{s.label}</div>
+              <ProgressBar value={s.score} color={perfColor(s.score)} h={4} label={`${s.emp.name} overall score`} />
             </div>
           ))}
         </div>
@@ -328,30 +326,34 @@ const KPIPage = ({
 
       {/* Employee filter */}
       {canManageKpis && scopedEmployees.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
+        <FilterBar>
           <select
+            className="select-field kpi-filter"
+            aria-label="Filter by employee"
             value={selEmp}
-            onChange={e => setSelEmp(e.target.value)}
-            style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 12px", color: T.text, fontSize: 13, outline: "none" }}>
-            <option value="all">All Employees</option>
+            onChange={e => setSelEmp(e.target.value)}>
+            <option value="all">All employees</option>
             {scopedEmployees.filter(e => e.role === "employee").map(e => (
               <option key={e.id} value={e.id}>{e.name}</option>
             ))}
           </select>
-        </div>
+        </FilterBar>
       )}
 
       {/* KPI cards grid */}
       {visible.length === 0 ? (
         <EmptyState
           icon={Target}
-          title="No KPI records available"
+          title="No KPIs yet"
           description={selEmp === "all"
-            ? "There are no KPI records in your current scope."
-            : "There are no KPI records for the selected employee."}
-        />
+            ? (canManageKpis ? "Assign a KPI to someone on one of your projects and their progress will be tracked here." : "KPIs assigned to you will appear here.")
+            : "There are no KPIs for the selected employee."}
+        >
+          {canManageKpis && selEmp === "all" && <Btn onClick={openModal}><Plus size={16} aria-hidden="true" />Assign KPI</Btn>}
+          {selEmp !== "all" && <Btn variant="ghost" onClick={() => setSelEmp("all")}>Show all employees</Btn>}
+        </EmptyState>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 14 }}>
+        <div className="kpi-grid" data-reveal>
         {visible.map((k, index) => {
           const p   = pct(k.current, k.target);
           const emp = employees.find(e => String(e.id) === String(k.empId));
@@ -375,47 +377,37 @@ const KPIPage = ({
           const canEditRating = canRateProjectKpi(user, k, projects, employees);
           const ratingIsSaving = Boolean(savingRatings[kpiKey]);
           return (
-            <div key={kpiKey}
-              style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 18, transition: "all .2s" }}
-              onMouseEnter={e => (e.currentTarget.style.borderColor = perfColor(p))}
-              onMouseLeave={e => (e.currentTarget.style.borderColor = T.border)}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>{k.title}</div>
-                  <div style={{ fontSize: 11, color: T.primary, fontWeight: 700 }}>{projectTitle}</div>
-                  {canManageKpis && emp && <div style={{ fontSize: 11, color: T.muted }}>{emp.name} · {emp.dept}</div>}
-                  <div style={{ fontSize: 10, color: T.muted, marginTop: 2 }}>Period: {k.period} · Weight: {k.weight}%</div>
+            <div key={kpiKey} className="kpi-card">
+              <div className="kpi-card__head">
+                <div className="kpi-card__titles">
+                  <div className="kpi-card__title">{k.title}</div>
+                  <div className="kpi-card__project">{projectTitle}</div>
+                  {canManageKpis && emp && <div className="kpi-card__meta">{emp.name} · {emp.dept}</div>}
+                  <div className="kpi-card__meta">{k.period} · weight {k.weight}%</div>
                 </div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: perfColor(p) }}>{p}%</div>
+                <div className="kpi-card__pct" style={{ color: perfColor(p) }}>{p}%</div>
               </div>
-              <ProgressBar value={k.current} max={k.target} color={perfColor(p)} />
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: T.muted }}>{k.current?.toLocaleString()} / {k.target?.toLocaleString()}</span>
-                <span style={{ fontSize: 11, color: perfColor(p), fontWeight: 700 }}>{perfLabel(p)}</span>
+              <ProgressBar value={k.current} max={k.target} color={perfColor(p)} label={`${k.title} progress`} />
+              <div className="kpi-card__progress">
+                <span>{k.current?.toLocaleString()} / {k.target?.toLocaleString()}</span>
+                <span style={{ color: perfColor(p), fontWeight: 500 }}>{perfLabel(p)}</span>
               </div>
-              <div style={{ borderTop: `1px solid ${T.border}`, marginTop: 12, paddingTop: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ fontSize: 11, color: T.muted }}>Project rating</span>
-                  <span style={{ fontSize: 12, color: hasValidRating ? T.text : T.muted, fontWeight: 700 }}>
+              <div className="kpi-card__section">
+                <div className="kpi-card__row">
+                  <span className="kpi-card__label">Project rating</span>
+                  <span style={{ color: hasValidRating ? T.text : T.muted, fontWeight: 500 }}>
                     {ratingResult}
                   </span>
                 </div>
                 {canEditRating && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <div className="kpi-card__rate">
                     <select
+                      className="select-field kpi-card__select"
                       aria-label={`Rating for ${k.title || "KPI"}`}
+                      aria-invalid={Boolean(ratingErrors[kpiKey])}
                       value={selectedRating}
                       disabled={ratingIsSaving}
                       onChange={event => changeRating(kpiKey, event.target.value)}
-                      style={{
-                        background: T.surface,
-                        border: `1px solid ${ratingErrors[kpiKey] ? T.danger : T.border}`,
-                        borderRadius: 6,
-                        color: T.text,
-                        fontSize: 12,
-                        outline: "none",
-                        padding: "5px 8px",
-                      }}
                     >
                       {PROJECT_KPI_RATING_OPTIONS.map(score => (
                         <option key={score} value={String(score)}>{score}</option>
@@ -423,32 +415,36 @@ const KPIPage = ({
                     </select>
                     <Btn
                       sm
+                      variant="ghost"
                       onClick={() => saveRating(k, kpiKey, selectedRating)}
                       disabled={ratingIsSaving}
                     >
-                      {ratingIsSaving ? "Saving…" : "Save Rating"}
+                      {ratingIsSaving ? "Saving…" : "Save rating"}
                     </Btn>
                   </div>
                 )}
                 {ratingErrors[kpiKey] && (
-                  <div role="alert" style={{ color: T.danger, fontSize: 11, marginTop: 8 }}>
+                  <div role="alert" className="kpi-card__error">
                     {ratingErrors[kpiKey]}
                   </div>
                 )}
               </div>
               {canManageKpis && (
-                <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
-                  <span style={{ fontSize: 11, color: T.muted, flexShrink: 0 }}>Update:</span>
+                <div className="kpi-card__update">
+                  <label className="kpi-card__label" htmlFor={`kpi-current-${kpiKey}`}>Update progress</label>
                   <input
+                    id={`kpi-current-${kpiKey}`}
+                    className="input-field kpi-card__input"
                     type="number"
+                    inputMode="numeric"
+                    aria-invalid={Boolean(updateErrors[k.id])}
                     defaultValue={k.current}
                     onBlur={e => updateCurrent(k.id, e.target.value, e.target, k.current)}
-                    style={{ flex: 1, background: T.surface, border: `1px solid ${updateErrors[k.id] ? T.danger : T.border}`, borderRadius: 6, padding: "4px 8px", color: T.text, fontSize: 12, outline: "none" }}
                   />
                 </div>
               )}
               {updateErrors[k.id] && (
-                <div role="alert" style={{ color: T.danger, fontSize: 11, marginTop: 8 }}>
+                <div role="alert" className="kpi-card__error">
                   {updateErrors[k.id]}
                 </div>
               )}
@@ -460,7 +456,7 @@ const KPIPage = ({
 
       {/* Assign KPI Modal */}
       {modal && (
-        <Modal title="Assign New KPI" onClose={closeModal}>
+        <Modal title="Assign a KPI" onClose={closeModal}>
           <form onSubmit={save}>
             <Select
               label="Project"
@@ -470,7 +466,7 @@ const KPIPage = ({
               hint={visibleProjects.length === 0 ? "No manageable projects are available." : undefined}
               onChange={e => changeProject(e.target.value)}
             >
-              <option value="">Select project</option>
+              <option value="">Select a project</option>
               {visibleProjects.filter(project => project.id != null).map(project => (
                 <option key={String(project.id)} value={String(project.id)}>
                   {project.title || project.name || "Untitled project"}
@@ -487,7 +483,7 @@ const KPIPage = ({
                 : "Select a project first, then choose an assigned employee."}
               onChange={e => updateForm("empId", e.target.value)}
             >
-              <option value="">Select employee</option>
+              <option value="">Select an employee</option>
               {projectEmployees.map(employee => (
                 <option key={String(employee.id)} value={String(employee.id)}>
                   {employee.name} — {employee.dept}
@@ -495,18 +491,19 @@ const KPIPage = ({
               ))}
             </Select>
             <Input
-              label="KPI Title"
+              label="KPI title"
               value={form.title}
               error={errors.title}
               onChange={e => updateForm("title", e.target.value)}
             />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "0 12px" }}>
+            <div className="form-grid form-grid--3">
               <Input
                 label="Target"
                 value={form.target}
                 error={errors.target}
                 onChange={e => updateForm("target", e.target.value)}
                 type="number"
+                inputMode="numeric"
               />
               <Input
                 label="Current"
@@ -514,13 +511,15 @@ const KPIPage = ({
                 error={errors.current}
                 onChange={e => updateForm("current", e.target.value)}
                 type="number"
+                inputMode="numeric"
               />
               <Input
-                label="Weight %"
+                label="Weight (%)"
                 value={form.weight}
                 error={errors.weight}
                 onChange={e => updateForm("weight", e.target.value)}
                 type="number"
+                inputMode="numeric"
               />
             </div>
             <Input
@@ -530,10 +529,10 @@ const KPIPage = ({
               onChange={e => updateForm("period", e.target.value)}
             />
             <FormFeedback>{submitError}</FormFeedback>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+            <div className="modal-actions">
               <Btn variant="ghost" onClick={closeModal} disabled={saving}>Cancel</Btn>
               <Btn type="submit" disabled={saving || visibleProjects.length === 0}>
-                <Check size={13} />{saving ? "Assigning…" : "Assign KPI"}
+                <Check size={16} aria-hidden="true" />{saving ? "Assigning…" : "Assign KPI"}
               </Btn>
             </div>
           </form>

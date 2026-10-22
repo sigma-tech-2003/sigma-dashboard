@@ -3,7 +3,7 @@ import "./SearchBar.css";
 
 const SearchBar = ({ value, onChange, placeholder, ariaLabel, style, ...props }) => (
   <div className="search-bar" style={style}>
-    <Search className="search-bar__icon" size={14} />
+    <Search className="search-bar__icon" size={16} aria-hidden="true" />
     <input
       {...props}
       value={value}

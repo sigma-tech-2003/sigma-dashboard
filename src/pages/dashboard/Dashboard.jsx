@@ -12,7 +12,10 @@ import {
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 
+import "./Dashboard.css";
 import { T }          from "../../theme/theme";
+import { axisTick, chartCursor, chartMotion, shortLabel, tooltipStyle } from "../../utils/chartTheme";
+import { payrollTrend } from "../../utils/payrollTrend";
 import { fmt, pct, fdate, getKpiRatingSummary, getProjectKpiRatingLabel, isValidProjectKpiScore, kpiScore, perfColor } from "../../utils/helpers";
 import { scopeAttendance, scopeEmployees, scopeByEmployee, scopeProjectKpis } from "../../utils/permissions";
 import { ANNOUNCEMENTS } from "../../data/announcements";
@@ -21,30 +24,25 @@ import Stat        from "../../components/stat/Stat";
 import LoadErrorGate from "../../components/load-error/LoadErrorGate";
 import Badge       from "../../components/badge/Badge";
 import Avatar      from "../../components/avatar/Avatar";
+import PersonCell  from "../../components/person-cell/PersonCell";
+import PageHeader  from "../../components/page-header/PageHeader";
+import ChartReveal from "../../components/chart-reveal/ChartReveal";
 import Card        from "../../components/card/Card";
 import ProgressBar from "../../components/ProgressBar/ProgressBar";
 
-// ── Shared building blocks (visual style copied from the original file) ───
-const EmptyRow = ({ children }) => <div style={{ color: T.muted, fontSize: 13 }}>{children}</div>;
+// ── Shared building blocks ──────────────────────────────────────────────
+const EmptyRow = ({ children }) => <p className="dash-empty">{children}</p>;
 
 const EmployeeRow = ({ emp, sub }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${T.border}` }}>
-    <Avatar emp={emp} size={30} />
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{emp.name}</div>
-      <div style={{ fontSize: 11, color: T.muted }}>{sub}</div>
-    </div>
+  <div className="dash-row">
+    <PersonCell emp={emp} sub={sub} />
     <Badge s={emp.status} />
   </div>
 );
 
 const LeaveRow = ({ l, emp }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${T.border}` }}>
-    {emp && <Avatar emp={emp} size={32} />}
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{emp?.name || "—"}</div>
-      <div style={{ fontSize: 11, color: T.muted }}>{l.type} · {l.days} day{l.days > 1 ? "s" : ""} · {fdate(l.start)}</div>
-    </div>
+  <div className="dash-row">
+    <PersonCell emp={emp} sub={`${l.type} · ${l.days} day${l.days > 1 ? "s" : ""} · ${fdate(l.start)}`} />
     <Badge s={l.status} />
   </div>
 );
@@ -163,11 +161,6 @@ const getEmployeeAttendanceRate = (employeeId, attendanceRecords) => {
 const attendanceSummaryLabel = (summary) =>
   `${summary.marked} marked · ${summary.unmarked} unmarked · ${summary.late} late`;
 
-const payTrend = [
-  { m: "Oct", total: 520000 }, { m: "Nov", total: 580000 }, { m: "Dec", total: 640000 },
-  { m: "Jan", total: 590000 }, { m: "Feb", total: 620000 }, { m: "Mar", total: 660000 },
-];
-
 const leaveStatusData = (leaves) => ([
   { name: "Approved", value: leaves.filter(l => l.status === "approved").length, color: T.success },
   { name: "Pending",  value: leaves.filter(l => l.status === "pending").length,  color: T.warning },
@@ -177,19 +170,19 @@ const leaveStatusData = (leaves) => ([
 const PieCard = ({ title, data }) => (
   <Card title={title}>
     <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-      <ResponsiveContainer width={120} height={120}>
+      <ChartReveal height={120}><ResponsiveContainer width={120} height={120}>
         <PieChart>
-          <Pie data={data} dataKey="value" innerRadius={35} outerRadius={55}>
+          <Pie {...chartMotion()} data={data} dataKey="value" innerRadius={35} outerRadius={55}>
             {data.map((e, i) => <Cell key={i} fill={e.color} />)}
           </Pie>
         </PieChart>
-      </ResponsiveContainer>
+      </ResponsiveContainer></ChartReveal>
       <div style={{ flex: 1 }}>
         {data.map((s, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
-            <span style={{ fontSize: 12, color: T.muted, flex: 1 }}>{s.name}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{s.value}</span>
+            <span style={{ fontSize: 13, color: T.mutedLight, flex: 1 }}>{s.name}</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{s.value}</span>
           </div>
         ))}
       </div>
@@ -200,31 +193,31 @@ const PieCard = ({ title, data }) => (
 const KpiBarCard = ({ title, data }) => (
   <Card title={title}>
     {data.length === 0 ? <EmptyRow>No KPI data yet.</EmptyRow> : (
-      <ResponsiveContainer width="100%" height={160}>
+      <ChartReveal height={160}><ResponsiveContainer width="100%" height={160}>
         <BarChart data={data} barSize={26} layout="vertical">
           <CartesianGrid strokeDasharray="3 3" stroke={T.border} horizontal={false} />
-          <XAxis type="number" domain={[0, 100]} tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-          <YAxis type="category" dataKey="name" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} width={60} />
-          <Tooltip contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
+          <XAxis type="number" domain={[0, 100]} tick={axisTick} axisLine={false} tickLine={false} />
+          <YAxis type="category" dataKey="name" tick={axisTick} axisLine={false} tickLine={false} width={60} />
+          <Tooltip cursor={chartCursor} contentStyle={tooltipStyle}
             formatter={v => [`${v}%`, "KPI Score"]} />
-          <Bar dataKey="score" radius={[0, 4, 4, 0]}>
+          <Bar {...chartMotion()} dataKey="score" radius={[0, 4, 4, 0]}>
             {data.map((e, i) => <Cell key={i} fill={perfColor(e.score)} />)}
           </Bar>
         </BarChart>
-      </ResponsiveContainer>
+      </ResponsiveContainer></ChartReveal>
     )}
   </Card>
 );
 
 const AnnouncementsCard = () => (
-  <Card title="Company Announcements">
+  <Card title="Company announcements">
     {ANNOUNCEMENTS.map(a => (
-      <div key={a.id} style={{ padding: "10px 0", borderBottom: `1px solid ${T.border}` }}>
+      <div key={a.id} className="dash-row dash-row--stack">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{a.title}</span>
-          <span style={{ fontSize: 11, color: T.muted, whiteSpace: "nowrap" }}>{fdate(a.date)}</span>
+          <span style={{ fontSize: 14, fontWeight: 500, color: T.text }}>{a.title}</span>
+          <span style={{ fontSize: 12, color: T.muted, whiteSpace: "nowrap" }}>{fdate(a.date)}</span>
         </div>
-        <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{a.body}</div>
+        <div style={{ fontSize: 13, color: T.mutedLight, marginTop: 4 }}>{a.body}</div>
       </div>
     ))}
   </Card>
@@ -251,8 +244,8 @@ const AdminDashboard = ({ user, projects = [], employees, kpis, attendance = [],
     : null;
 
   const deptData = departments.length > 0
-    ? departments.map(d => ({ dept: d.name.slice(0, 4), count: employees.filter(e => e.dept === d.name && e.status === "active").length })).filter(d => d.count > 0)
-    : [...new Set(employees.map(e => e.dept).filter(Boolean))].map(d => ({ dept: d.slice(0, 4), count: employees.filter(e => e.dept === d && e.status === "active").length })).filter(d => d.count > 0);
+    ? departments.map(d => ({ dept: d.name, count: employees.filter(e => e.dept === d.name && e.status === "active").length })).filter(d => d.count > 0)
+    : [...new Set(employees.map(e => e.dept).filter(Boolean))].map(d => ({ dept: d, count: employees.filter(e => e.dept === d && e.status === "active").length })).filter(d => d.count > 0);
 
   const kpiEmployees = employees.filter(employee => ["employee", "tl"].includes(employee.role));
   const employeeRatings = kpiEmployees.map((employee) => {
@@ -277,36 +270,41 @@ const AdminDashboard = ({ user, projects = [], employees, kpis, attendance = [],
     )),
   })).filter(employee => employee.score > 0);
 
+  const trend = payrollTrend(payroll, new Date());
+
   return (
     <div>
+      <PageHeader title="Dashboard" description="Company overview" />
+
       {/* Headcount by role */}
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
-        <Stat icon={Users}     label="Total Employees"   value={employees.length}   sub={`${active.length} active`}              color={T.primary}   />
-        <Stat icon={Building2} label="Total Departments" value={departments.length} sub={`${departments.filter(d => d.status === "Active").length} active`} color={T.purple} />
-        <Stat icon={UserCog}   label="Total Managers"    value={managers.length}    sub="Department heads"                       color={T.secondary} />
-        <Stat icon={ShieldCheck} label="Total Team Leads" value={teamLeads.length}  sub="Across all teams"                       color={T.success}   />
-        <Stat icon={Briefcase} label="Total HR Staff"    value={hrStaff.length}     sub="HR operations"                          color={T.warning}   />
+      <div className="stat-grid" data-reveal>
+        <Stat icon={Users}     label="Total employees"   value={employees.length}   sub={`${active.length} active`}              color={T.primaryText}   />
+        <Stat icon={Building2} label="Total departments" value={departments.length} sub={`${departments.filter(d => d.status === "Active").length} active`} color={T.purple} />
+        <Stat icon={UserCog}   label="Total managers"    value={managers.length}    sub="Department heads"                       color={T.secondary} />
+        <Stat icon={ShieldCheck} label="Total team leads" value={teamLeads.length}  sub="Across all teams"                       color={T.success}   />
+        <Stat icon={Briefcase} label="Total HR staff"    value={hrStaff.length}     sub="HR operations"                          color={T.warning}   />
       </div>
 
       {/* Org-wide summaries */}
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        <Stat icon={Clock}      label="Attendance Today" value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)} color={T.secondary} />
-        <Stat icon={Calendar}   label="Leave Summary"      value={leaves.filter(l => l.status === "pending").length} sub={`${leaves.filter(l => l.status === "approved").length} approved this period`} color={T.warning} />
-        <Stat icon={DollarSign} label="Payroll Summary"    value={fmt(netPaid)} sub={`${payroll.length} payslips processed`} color={T.success} />
+      <div className="stat-grid" data-reveal>
+        <Stat icon={Clock}      label="Attendance today" value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)} color={T.secondary} />
+        <Stat icon={Calendar}   label="Leave summary"      value={leaves.filter(l => l.status === "pending").length} sub={`${leaves.filter(l => l.status === "approved").length} approved this period`} color={T.warning} />
+        <Stat icon={DollarSign} label="Payroll summary"    value={fmt(netPaid)} sub={`${payroll.length} payslips processed`} color={T.success} />
         <Stat
           icon={Target}
-          label="KPI Summary"
-          value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+          label="KPI summary"
+          value={ratingSummary.average === null ? "Not rated" : `${ratingSummary.average}/10`}
           sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} rated · ${averageCompletion === null ? "No target completion data" : `${averageCompletion}% target/current completion`}`}
           color={T.purple}
         />
       </div>
 
       {/* Charts */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 20 }}>
-        <Card title="Payroll Trend (6 months)">
-          <ResponsiveContainer width="100%" height={160}>
-            <AreaChart data={payTrend}>
+      <div className="dash-grid" data-reveal>
+        <Card title="Payroll trend (last 6 months)">
+          {!trend.hasData ? <EmptyRow>No payroll has been processed in the last six months.</EmptyRow> : (
+          <ChartReveal height={160}><ResponsiveContainer width="100%" height={160}>
+            <AreaChart data={trend.data}>
               <defs>
                 <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor={T.primary} stopOpacity={0.3} />
@@ -314,66 +312,68 @@ const AdminDashboard = ({ user, projects = [], employees, kpis, attendance = [],
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-              <XAxis dataKey="m" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: T.muted, fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${v / 1000}K`} />
-              <Tooltip contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }} labelStyle={{ color: T.text }} formatter={v => [`PKR ${v.toLocaleString()}`, ""]} />
-              <Area type="monotone" dataKey="total" stroke={T.primary} strokeWidth={2} fill="url(#pg)" />
+              <XAxis dataKey="m" tick={axisTick} axisLine={false} tickLine={false} />
+              <YAxis tick={axisTick} axisLine={false} tickLine={false} tickFormatter={v => `${v / 1000}K`} />
+              <Tooltip cursor={chartCursor} contentStyle={tooltipStyle} labelStyle={{ color: T.text }} formatter={v => [`PKR ${v.toLocaleString()}`, ""]} />
+              <Area {...chartMotion()} type="monotone" dataKey="total" stroke={T.primary} strokeWidth={2} fill="url(#pg)" />
             </AreaChart>
-          </ResponsiveContainer>
-        </Card>
-
-        <Card title="Employees by Department">
-          {deptData.length === 0 ? <EmptyRow>No department data yet.</EmptyRow> : (
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={deptData} barSize={20}>
-                <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                <XAxis dataKey="dept" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }} labelStyle={{ color: T.text }} />
-                <Bar dataKey="count" fill={T.primary} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          </ResponsiveContainer></ChartReveal>
           )}
         </Card>
 
-        <PieCard title="Leave Status Overview" data={leaveStatusData(leaves)} />
+        <Card title="Employees by department">
+          {deptData.length === 0 ? <EmptyRow>No department data yet.</EmptyRow> : (
+            <ChartReveal height={160}><ResponsiveContainer width="100%" height={160}>
+              <BarChart data={deptData} barSize={20}>
+                <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                <XAxis dataKey="dept" tick={axisTick} interval={0} tickFormatter={shortLabel} axisLine={false} tickLine={false} />
+                <YAxis tick={axisTick} axisLine={false} tickLine={false} />
+                <Tooltip cursor={chartCursor} contentStyle={tooltipStyle} labelStyle={{ color: T.text }} />
+                <Bar {...chartMotion()} dataKey="count" fill={T.primary} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer></ChartReveal>
+          )}
+        </Card>
+
+        <PieCard title="Leave status overview" data={leaveStatusData(leaves)} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
-        <Card title="Company Project KPI Ratings" right={<span style={{ color: T.muted, fontSize: 11 }}>0–10 scale</span>}>
+      <div className="dash-grid" data-reveal>
+        <Card title="Company project KPI ratings" right={<span style={{ color: T.muted, fontSize: 12 }}>0–10 scale</span>}>
           {employeeRatings.length === 0 ? <EmptyRow>No valid company KPI ratings yet.</EmptyRow> : (
-            <ResponsiveContainer width="100%" height={Math.max(180, employeeRatings.length * 38)}>
+            <ChartReveal height={Math.max(180, employeeRatings.length * 38)}><ResponsiveContainer width="100%" height={Math.max(180, employeeRatings.length * 38)}>
               <BarChart data={employeeRatings} barSize={22} layout="vertical" margin={{ right: 42 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={T.border} horizontal={false} />
-                <XAxis type="number" domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} width={90} />
+                <XAxis type="number" domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} tick={axisTick} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={axisTick} axisLine={false} tickLine={false} width={90} />
                 <Tooltip
-                  contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
+                  cursor={chartCursor}
+                  contentStyle={tooltipStyle}
                   labelStyle={{ color: T.text }}
                   formatter={(value, _name, item) => [`${value}/10 (${item.payload.ratedCount} rated)`, "Average rating"]}
                 />
-                <Bar dataKey="rating" fill={T.purple} radius={[0, 4, 4, 0]} />
+                <Bar {...chartMotion()} dataKey="rating" fill={T.purple} radius={[0, 4, 4, 0]} />
               </BarChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer></ChartReveal>
           )}
         </Card>
-        <KpiBarCard title="Company KPI Target Progress" data={kpiProgress} />
+        <KpiBarCard title="Company KPI target progress" data={kpiProgress} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 16, marginBottom: 16 }}>
-        <Card title="Recent Employees">
+      <div className="dash-grid dash-grid--wide" data-reveal>
+        <Card title="Recent employees">
           {recentOf(employees).length === 0 ? <EmptyRow>No employees yet.</EmptyRow> :
             recentOf(employees).map(e => <EmployeeRow key={e.id} emp={e} sub={`${e.pos} · ${e.dept}`} />)}
         </Card>
 
-        <Card title="Monthly Report" right={<ListClipboard />}>
+        <Card title="Monthly report" right={<ListClipboard />}>
           <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.8 }}>
             <div><strong style={{ color: T.text }}>{active.length}</strong> active employees this month</div>
             <div><strong style={{ color: T.text }}>{leaves.filter(l => l.status === "approved").length}</strong> leave requests approved</div>
             <div><strong style={{ color: T.text }}>{fmt(netPaid)}</strong> total payroll disbursed</div>
             <div>
               <strong style={{ color: T.text }}>
-                {ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+                {ratingSummary.average === null ? "Not rated" : `${ratingSummary.average}/10`}
               </strong>{" "}
               company KPI rating · {ratingSummary.ratedCount}/{ratingSummary.totalCount} rated
             </div>
@@ -381,7 +381,7 @@ const AdminDashboard = ({ user, projects = [], employees, kpis, attendance = [],
         </Card>
       </div>
 
-      <Card title="Pending Leave Requests">
+      <Card title="Pending leave requests">
         {leaves.filter(l => l.status === "pending").length === 0
           ? <EmptyRow>No pending requests.</EmptyRow>
           : leaves.filter(l => l.status === "pending").map(l => <LeaveRow key={l.id} l={l} emp={employees.find(e => e.id === l.empId)} />)}
@@ -434,51 +434,52 @@ const HRDashboard = ({ user, projects = [], employees, kpis, attendance = [], le
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        <Stat icon={Users} label="Total Employees" value={employees.length} sub={`${active.length} active`} color={T.primary} />
-        <Stat icon={Clock} label="Attendance Overview" value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)} color={T.secondary} />
-        <Stat icon={Calendar} label="Employees on Approved Leave Today" value={approvedLeaveToday} sub="Approved leave in progress" color={T.warning} />
-        <Stat icon={ListChecks} label="Pending Leave Requests" value={pending.length} sub="Awaiting review in Leave" color={T.danger} />
-        <Stat icon={DollarSign} label="Total Payroll" value={fmt(totalPayroll)} sub={`${payroll.length} payroll records`} color={T.success} />
+      <PageHeader title="Dashboard" description="Operations overview" />
+      <div className="stat-grid" data-reveal>
+        <Stat icon={Users} label="Total employees" value={employees.length} sub={`${active.length} active`} color={T.primaryText} />
+        <Stat icon={Clock} label="Attendance overview" value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)} color={T.secondary} />
+        <Stat icon={Calendar} label="Employees on approved leave today" value={approvedLeaveToday} sub="Approved leave in progress" color={T.warning} />
+        <Stat icon={ListChecks} label="Pending leave requests" value={pending.length} sub="Awaiting review in Leave" color={T.danger} />
+        <Stat icon={DollarSign} label="Total payroll" value={fmt(totalPayroll)} sub={`${payroll.length} payroll records`} color={T.success} />
         <Stat
           icon={Target}
-          label="KPI Average"
-          value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+          label="KPI average"
+          value={ratingSummary.average === null ? "Not rated" : `${ratingSummary.average}/10`}
           sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} visible KPIs rated`}
           color={T.purple}
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
+      <div className="dash-grid" data-reveal>
         {hasLeaveData
-          ? <PieCard title="Leave Status" data={leaveStatus} />
+          ? <PieCard title="Leave status" data={leaveStatus} />
           : (
-            <Card title="Leave Status">
+            <Card title="Leave status">
               <EmptyRow>No leave requests yet.</EmptyRow>
             </Card>
           )}
-        <Card title="Recent Employees">
+        <Card title="Recent employees">
           {recentOf(employees).length === 0 ? <EmptyRow>No employees yet.</EmptyRow> :
             recentOf(employees).map(e => <EmployeeRow key={e.id} emp={e} sub={`${e.pos} · ${e.dept}`} />)}
         </Card>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16 }}>
+      <div className="dash-grid" data-reveal>
         <Card
-          title="KPI Target Progress"
+          title="KPI target progress"
           right={<span style={{ fontSize: 12, color: T.muted }}>{averageProgress === null ? "No KPI data" : `${averageProgress}%`}</span>}
         >
           {averageProgress === null ? <EmptyRow>No KPI progress data yet.</EmptyRow> : (
             <div>
               <ProgressBar value={averageProgress} max={100} color={perfColor(averageProgress)} />
-              <div style={{ color: T.muted, fontSize: 11, marginTop: 8 }}>
+              <div style={{ color: T.muted, fontSize: 12, marginTop: 8 }}>
                 Average target/current progress across {visibleKpis.length} visible KPI{visibleKpis.length === 1 ? "" : "s"}.
               </div>
             </div>
           )}
         </Card>
 
-        <Card title="Pending Leave Requests">
+        <Card title="Pending leave requests">
           {recentPending.length === 0 ? <EmptyRow>No pending requests.</EmptyRow> :
             recentPending.map(leave => (
               <LeaveRow
@@ -576,79 +577,78 @@ const ManagerDashboard = ({ user, projects = [], employees, kpis, attendance = [
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 22, fontWeight: 800, color: T.text, marginBottom: 4 }}>{user.dept} Department</div>
-        <div style={{ fontSize: 13, color: T.muted }}>Manager · {user.name}</div>
-      </div>
+      <PageHeader title={`${user.dept} department`} description={`Manager · ${user.name}`} />
 
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        <Stat icon={Users} label="Department Employee Count" value={deptEmployees.length} sub={user.dept} color={T.primary} />
-        <Stat icon={UserCog} label="Active Employees" value={activeEmployees.length} sub={`${deptEmployees.length - activeEmployees.length} inactive`} color={T.success} />
-        <Stat icon={ShieldCheck} label="Team Leads" value={teamLeads.length} sub="In your department" color={T.secondary} />
-        <Stat icon={Calendar} label="Pending Leave Requests" value={pendingLeaves.length} sub="Awaiting review in Leave" color={T.warning} />
-        <Stat icon={Clock} label="Attendance Summary" value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)} color={T.secondary} />
-        <Stat icon={ListChecks} label="Pending KPI Tasks" value={pendingTasks} sub="Active, incomplete or unrated" color={T.danger} />
+      <div className="stat-grid" data-reveal>
+        <Stat icon={Users} label="Department employee count" value={deptEmployees.length} sub={user.dept} color={T.primaryText} />
+        <Stat icon={UserCog} label="Active employees" value={activeEmployees.length} sub={`${deptEmployees.length - activeEmployees.length} inactive`} color={T.success} />
+        <Stat icon={ShieldCheck} label="Team leads" value={teamLeads.length} sub="In your department" color={T.secondary} />
+        <Stat icon={Calendar} label="Pending leave requests" value={pendingLeaves.length} sub="Awaiting review in Leave" color={T.warning} />
+        <Stat icon={Clock} label="Attendance summary" value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)} color={T.secondary} />
+        <Stat icon={ListChecks} label="Pending KPI tasks" value={pendingTasks} sub="Active, incomplete or unrated" color={T.danger} />
         <Stat
           icon={Target}
-          label="Department KPI Average"
-          value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+          label="Department KPI average"
+          value={ratingSummary.average === null ? "Not rated" : `${ratingSummary.average}/10`}
           sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} scoped KPIs rated`}
           color={T.purple}
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
+      <div className="dash-grid" data-reveal>
         <Card
-          title="Employee KPI Rating Comparison"
-          right={<span style={{ color: T.muted, fontSize: 11 }}>0–10 scale</span>}
+          title="Employee KPI rating comparison"
+          right={<span style={{ color: T.muted, fontSize: 12 }}>0–10 scale</span>}
         >
           {employeeRatings.length === 0 ? <EmptyRow>No valid employee KPI ratings yet.</EmptyRow> : (
-            <ResponsiveContainer width="100%" height={Math.max(180, employeeRatings.length * 38)}>
+            <ChartReveal height={Math.max(180, employeeRatings.length * 38)}><ResponsiveContainer width="100%" height={Math.max(180, employeeRatings.length * 38)}>
               <BarChart data={employeeRatings} barSize={22} layout="vertical" margin={{ right: 42 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={T.border} horizontal={false} />
-                <XAxis type="number" domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} width={90} />
+                <XAxis type="number" domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} tick={axisTick} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={axisTick} axisLine={false} tickLine={false} width={90} />
                 <Tooltip
-                  contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
+                  cursor={chartCursor}
+                  contentStyle={tooltipStyle}
                   labelStyle={{ color: T.text }}
                   formatter={(value, _name, item) => [`${value}/10 (${item.payload.ratedCount} rated)`, "Average rating"]}
                 />
-                <Bar dataKey="rating" fill={T.purple} radius={[0, 4, 4, 0]} />
+                <Bar {...chartMotion()} dataKey="rating" fill={T.purple} radius={[0, 4, 4, 0]} />
               </BarChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer></ChartReveal>
           )}
         </Card>
 
-        <Card title="Monthly Productivity">
+        <Card title="Monthly productivity">
           {!hasMonthlyData ? <EmptyRow>No dated KPI completion data is available for the latest six months.</EmptyRow> : (
-            <ResponsiveContainer width="100%" height={190}>
+            <ChartReveal height={190}><ResponsiveContainer width="100%" height={190}>
               <BarChart data={monthlyData} barSize={24}>
                 <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false} />
-                <XAxis dataKey="month" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis domain={[0, 100]} tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={value => `${value}%`} />
+                <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} />
+                <YAxis domain={[0, 100]} tick={axisTick} axisLine={false} tickLine={false} tickFormatter={value => `${value}%`} />
                 <Tooltip
-                  contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
+                  cursor={chartCursor}
+                  contentStyle={tooltipStyle}
                   labelStyle={{ color: T.text }}
                   formatter={(value, _name, item) => [item.payload.hasData ? `${value}%` : "No data", "Average completion"]}
                 />
-                <Bar dataKey="completion" radius={[4, 4, 0, 0]}>
+                <Bar {...chartMotion()} dataKey="completion" radius={[4, 4, 0, 0]}>
                   {monthlyData.map(month => <Cell key={month.month} fill={month.hasData ? T.secondary : T.border} />)}
                 </Bar>
               </BarChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer></ChartReveal>
           )}
         </Card>
       </div>
 
       <div style={{ marginBottom: 16 }}>
         <Card
-          title="Department KPI Target Progress"
+          title="Department KPI target progress"
           right={<span style={{ color: T.muted, fontSize: 12 }}>{averageProgress === null ? "No KPI data" : `${averageProgress}%`}</span>}
         >
           {averageProgress === null ? <EmptyRow>No KPI progress data yet.</EmptyRow> : (
             <div>
               <ProgressBar value={averageProgress} max={100} color={perfColor(averageProgress)} />
-              <div style={{ color: T.muted, fontSize: 11, marginTop: 8 }}>
+              <div style={{ color: T.muted, fontSize: 12, marginTop: 8 }}>
                 Average target/current completion across {deptKpis.length} scoped KPI{deptKpis.length === 1 ? "" : "s"}.
               </div>
             </div>
@@ -656,12 +656,12 @@ const ManagerDashboard = ({ user, projects = [], employees, kpis, attendance = [
         </Card>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 16, marginBottom: 16 }}>
-        <Card title="Recent Department Employees">
+      <div className="dash-grid dash-grid--wide" data-reveal>
+        <Card title="Recent department employees">
           {recentEmployees.length === 0 ? <EmptyRow>No department employees yet.</EmptyRow> :
             recentEmployees.map(employee => <EmployeeRow key={employee.id} emp={employee} sub={employee.pos} />)}
         </Card>
-        <Card title="Pending Leave Requests">
+        <Card title="Pending leave requests">
           {recentPendingLeaves.length === 0 ? <EmptyRow>No pending requests.</EmptyRow> :
             recentPendingLeaves.map(leave => (
               <LeaveRow key={leave.id} l={leave} emp={employeeById.get(String(leave.empId))} />
@@ -720,48 +720,46 @@ const TLDashboard = ({ user, projects = [], employees, kpis, attendance = [], le
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 22, fontWeight: 800, color: T.text, marginBottom: 4 }}>My Team</div>
-        <div style={{ fontSize: 13, color: T.muted }}>Team Lead · {user.name} · {user.dept}</div>
+      <PageHeader title="My team" description={`Team lead · ${user.name} · ${user.dept}`} />
+
+      <div className="stat-grid" data-reveal>
+        <Stat icon={Users}    label="Team size"            value={team.length}                    sub={`${team.filter(e => e.status === "active").length} active`} color={T.primaryText}   />
+        <Stat icon={Clock}    label="Team attendance"      value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)}                                color={T.secondary} />
+        <Stat icon={Calendar} label="Pending leave requests" value={pendingLeaves.length}         sub="Awaiting your review"                                       color={T.warning}   />
+        <Stat icon={Target}   label="Team KPI rating"      value={ratingSummary.average === null ? "Not rated" : `${ratingSummary.average}/10`} sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} scoped KPIs rated`} color={T.purple} />
+        <Stat icon={TrendingUp} label="Task progress"      value={teamKpis.length ? `${taskProgress}%` : "—"} sub={`${pendingTasks} pending KPI task${pendingTasks === 1 ? "" : "s"}`} color={T.success} />
       </div>
 
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        <Stat icon={Users}    label="Team Size"            value={team.length}                    sub={`${team.filter(e => e.status === "active").length} active`} color={T.primary}   />
-        <Stat icon={Clock}    label="Team Attendance"      value={`${att.attended}/${att.total}`} sub={attendanceSummaryLabel(att)}                                color={T.secondary} />
-        <Stat icon={Calendar} label="Pending Leave Requests" value={pendingLeaves.length}         sub="Awaiting your review"                                       color={T.warning}   />
-        <Stat icon={Target}   label="Team KPI Rating"      value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`} sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} scoped KPIs rated`} color={T.purple} />
-        <Stat icon={TrendingUp} label="Task Progress"      value={teamKpis.length ? `${taskProgress}%` : "—"} sub={`${pendingTasks} pending KPI task${pendingTasks === 1 ? "" : "s"}`} color={T.success} />
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
-        <Card title="Team KPI Ratings" right={<span style={{ color: T.muted, fontSize: 11 }}>0–10 scale</span>}>
+      <div className="dash-grid" data-reveal>
+        <Card title="Team KPI ratings" right={<span style={{ color: T.muted, fontSize: 12 }}>0–10 scale</span>}>
           {teamRatings.length === 0 ? <EmptyRow>No valid team KPI ratings yet.</EmptyRow> : (
-            <ResponsiveContainer width="100%" height={Math.max(180, teamRatings.length * 38)}>
+            <ChartReveal height={Math.max(180, teamRatings.length * 38)}><ResponsiveContainer width="100%" height={Math.max(180, teamRatings.length * 38)}>
               <BarChart data={teamRatings} barSize={22} layout="vertical" margin={{ right: 42 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={T.border} horizontal={false} />
-                <XAxis type="number" domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fill: T.muted, fontSize: 11 }} axisLine={false} tickLine={false} width={90} />
+                <XAxis type="number" domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} tick={axisTick} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={axisTick} axisLine={false} tickLine={false} width={90} />
                 <Tooltip
-                  contentStyle={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }}
+                  cursor={chartCursor}
+                  contentStyle={tooltipStyle}
                   labelStyle={{ color: T.text }}
                   formatter={(value, _name, item) => [`${value}/10 (${item.payload.ratedCount} rated)`, "Average rating"]}
                 />
-                <Bar dataKey="rating" fill={T.purple} radius={[0, 4, 4, 0]} />
+                <Bar {...chartMotion()} dataKey="rating" fill={T.purple} radius={[0, 4, 4, 0]} />
               </BarChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer></ChartReveal>
           )}
         </Card>
-        <Card title="Employee Productivity">
+        <Card title="Employee productivity">
           {employeeMetrics.length === 0 ? <EmptyRow>No team members assigned yet.</EmptyRow> : employeeMetrics.map(metric => (
               <div key={metric.employee.id} style={{ marginBottom: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
                   <span style={{ fontSize: 13, color: T.text }}>
                     {metric.employee.name || metric.employee.email || `Employee ${metric.employee.id}`}
                   </span>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12, fontWeight: 700 }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12, fontWeight: 600 }}>
                     <span style={{ color: perfColor(metric.completion) }}>Completion {metric.completion}%</span>
                     <span style={{ color: T.purple }}>
-                      Rating {metric.rating === null ? "Not Rated" : `${metric.rating}/10`}
+                      Rating {metric.rating === null ? "Not rated" : `${metric.rating}/10`}
                     </span>
                   </div>
                 </div>
@@ -771,7 +769,7 @@ const TLDashboard = ({ user, projects = [], employees, kpis, attendance = [], le
         </Card>
       </div>
 
-      <Card title="Recent Activities">
+      <Card title="Recent activities">
         {teamLeaves.length === 0 ? <EmptyRow>No recent activity.</EmptyRow> :
           [...teamLeaves].sort((a, b) => new Date(b.applied || 0) - new Date(a.applied || 0)).slice(0, 6)
             .map(l => <LeaveRow key={l.id} l={l} emp={employees.find(e => e.id === l.empId)} />)}
@@ -818,26 +816,23 @@ const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendan
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 22, fontWeight: 800, color: T.text, marginBottom: 4 }}>Welcome back, {user.name.split(" ")[0]} 👋</div>
-        <div style={{ fontSize: 13, color: T.muted }}>{user.pos} · {user.dept}</div>
-      </div>
+      <PageHeader title={`Welcome back, ${user.name.split(" ")[0]}`} description={`${user.pos} · ${user.dept}`} />
 
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
+      <div className="stat-grid" data-reveal>
         <Stat
           icon={Target}
-          label="Project KPI Rating"
-          value={ratingSummary.average === null ? "Not Rated" : `${ratingSummary.average}/10`}
+          label="Project KPI rating"
+          value={ratingSummary.average === null ? "Not rated" : `${ratingSummary.average}/10`}
           sub={`${ratingSummary.ratedCount}/${ratingSummary.totalCount} rated · ${averageCompletion === null ? "No target/current completion data" : `${averageCompletion}% average target/current completion`}`}
           color={T.purple}
         />
-        <Stat icon={Calendar}   label="Leave Taken"       value={leaveTaken} sub={totalTakenSub(myBal)}  color={T.warning}          />
+        <Stat icon={Calendar}   label="Leave taken"       value={leaveTaken} sub={totalTakenSub(myBal)}  color={T.warning}          />
         <Stat icon={Clock}      label="Attendance %"      value={myAttendance.percentage === null ? "Not Marked" : `${myAttendance.percentage}%`} sub={myAttendance.total ? `${myAttendance.attended}/${myAttendance.total} present or late` : "No eligible attendance records"} color={T.secondary} />
-        <Stat icon={DollarSign} label="My Payslips"       value={lastPayslip ? fmt(lastPayslip.net) : "—"} sub={lastPayslip ? `${lastPayslip.month} ${lastPayslip.year}` : "No payslip yet"} color={T.success} />
+        <Stat icon={DollarSign} label="My payslips"       value={lastPayslip ? fmt(lastPayslip.net) : "—"} sub={lastPayslip ? `${lastPayslip.month} ${lastPayslip.year}` : "No payslip yet"} color={T.success} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
-        <Card title="My KPIs — Performance">
+      <div className="dash-grid" data-reveal>
+        <Card title="My KPIs — performance">
           {myKpis.length === 0 ? <EmptyRow>No KPIs assigned yet.</EmptyRow> : myKpis.map(k => {
             const rawCompletion = pct(k.current, k.target);
             const p = Number.isFinite(rawCompletion) ? rawCompletion : 0;
@@ -852,7 +847,7 @@ const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendan
             const hasValidRating = isValidProjectKpiScore(k.rating);
             const ratingText = hasValidRating
               ? `${Number(k.rating)}/10 · ${getProjectKpiRatingLabel(k.rating)}`
-              : "Not Rated";
+              : "Not rated";
             return (
               <div key={k.id ?? k._docId ?? `${k.empId}-${k.projectId}`} style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
@@ -860,13 +855,13 @@ const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendan
                     <div style={{ fontSize: 13, color: T.text, fontWeight: 500 }}>
                       {k.title || "Untitled KPI"}
                     </div>
-                    <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{projectTitle}</div>
+                    <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>{projectTitle}</div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 12, color: perfColor(p), fontWeight: 700 }}>
+                    <div style={{ fontSize: 12, color: perfColor(p), fontWeight: 600 }}>
                       Completion {p}%
                     </div>
-                    <div style={{ fontSize: 11, color: hasValidRating ? T.purple : T.muted, marginTop: 2 }}>
+                    <div style={{ fontSize: 12, color: hasValidRating ? T.purple : T.muted, marginTop: 2 }}>
                       Rating {ratingText}
                     </div>
                   </div>
@@ -876,7 +871,7 @@ const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendan
                   max={hasValidProgress ? Number(k.target) : 100}
                   color={perfColor(p)}
                 />
-                <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>
                   {k.current ?? "—"} / {k.target ?? "—"} · Weight: {k.weight ?? "—"}%
                 </div>
               </div>
@@ -884,7 +879,7 @@ const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendan
           })}
         </Card>
 
-        <Card title="My Tasks" right={<span style={{ fontSize: 11, color: T.muted }}>{completedTasks}/{myKpis.length} complete</span>}>
+        <Card title="My tasks" right={<span style={{ fontSize: 12, color: T.muted }}>{completedTasks}/{myKpis.length} complete</span>}>
           {myKpis.length === 0 ? <EmptyRow>No tasks assigned yet.</EmptyRow> : myKpis.map(k => {
             const p = pct(k.current, k.target);
             const done = p >= 100;
@@ -892,20 +887,20 @@ const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendan
               <div key={k.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
                 <CheckCircle2 size={16} color={done ? T.success : T.muted} />
                 <span style={{ flex: 1, fontSize: 13, color: T.text }}>{k.title}</span>
-                <span style={{ fontSize: 11, color: done ? T.success : T.warning, fontWeight: 600 }}>{done ? "Completed" : "In Progress"}</span>
+                <span style={{ fontSize: 12, color: done ? T.success : T.warning, fontWeight: 600 }}>{done ? "Completed" : "In Progress"}</span>
               </div>
             );
           })}
         </Card>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16, marginBottom: 16 }}>
-        <Card title="My Leave Requests">
+      <div className="dash-grid" data-reveal>
+        <Card title="My leave requests">
           {myLeaves.length === 0 ? <EmptyRow>No leave requests.</EmptyRow> : myLeaves.map(l => (
             <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${T.border}` }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{l.type} Leave</div>
-                <div style={{ fontSize: 11, color: T.muted }}>{fdate(l.start)} → {fdate(l.end)} · {l.days} day{l.days > 1 ? "s" : ""}</div>
+                <div style={{ fontSize: 12, color: T.muted }}>{fdate(l.start)} → {fdate(l.end)} · {l.days} day{l.days > 1 ? "s" : ""}</div>
               </div>
               <Badge s={l.status} />
             </div>
@@ -915,11 +910,11 @@ const EmployeeDashboard = ({ user, employees = [], projects = [], kpis, attendan
         <AnnouncementsCard />
       </div>
 
-      <Card title="My Profile">
+      <Card title="My profile">
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
           <Avatar emp={user} size={44} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{user.name}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{user.name}</div>
             <div style={{ fontSize: 12, color: T.muted }}>{user.empId} · {user.pos}</div>
           </div>
         </div>

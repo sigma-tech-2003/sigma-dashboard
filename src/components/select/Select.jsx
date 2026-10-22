@@ -1,7 +1,5 @@
 import { useId } from "react";
-import "./Select.css";
-import "../form-field/FieldHelp.css";
-import { T } from "../../theme/theme";
+import "../form-field/Field.css";
 
 const Select = ({
   label,
@@ -9,7 +7,7 @@ const Select = ({
   error,
   id,
   children,
-  style,
+  className = "",
   ...props
 }) => {
   const generatedId = useId();
@@ -17,7 +15,7 @@ const Select = ({
   const descriptionId = error ? fieldId + "-error" : hint ? fieldId + "-hint" : undefined;
 
   return (
-    <div className="select-wrapper">
+    <div className={"select-wrapper " + className}>
       {label && <label className="select-label" htmlFor={fieldId}>{label}</label>}
       <select
         {...props}
@@ -25,12 +23,6 @@ const Select = ({
         className="select-field"
         aria-invalid={Boolean(error)}
         aria-describedby={descriptionId}
-        style={{
-          background: T.card,
-          border: "1px solid " + (error ? T.danger : T.border),
-          color: T.text,
-          ...style,
-        }}
       >
         {children}
       </select>

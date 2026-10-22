@@ -3,7 +3,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: var(--color-white);
   flex-shrink: 0;
 }

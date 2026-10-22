@@ -1,13 +1,25 @@
 // src/pages/employees/EmployeesPage.jsx
 
 import { useRef, useState } from "react";
-import { Plus, Search, Edit, Trash2, Check, Eye, KeyRound } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, Eye, KeyRound, Users, SearchX } from "lucide-react";
 
+import "./Employees.css";
 import { T }        from "../../theme/theme";
 import { fmt, fdate } from "../../utils/helpers";
 import { scopeEmployees, assignableRoles, canManageEmployee } from "../../utils/permissions";
 import Badge   from "../../components/badge/Badge";
+import { resolveBadge } from "../../components/badge/badgeStatuses";
 import Avatar  from "../../components/avatar/Avatar";
+import PersonCell from "../../components/person-cell/PersonCell";
+import PageHeader from "../../components/page-header/PageHeader";
+import SearchBar from "../../components/search-bar/SearchBar";
+import FilterBar from "../../components/filter-bar/FilterBar";
+import DataTable from "../../components/data-table/DataTable";
+import EmptyState from "../../components/empty-state/EmptyState";
+import IconButton from "../../components/icon-button/IconButton";
+import DetailList from "../../components/detail-list/DetailList";
+import ConfirmDialog from "../../components/confirm-dialog/ConfirmDialog";
+import FormFeedback from "../../components/form-feedback/FormFeedback";
 import Modal   from "../../components/modal/Modal";
 import Input   from "../../components/input/Input";
 import Select  from "../../components/select/Select";
@@ -77,6 +89,7 @@ const EmployeesPage = ({
   const [deptError,       setDeptError]       = useState("");
   const [editEmployeeDocumentId, setEditEmployeeDocumentId] = useState(null);
   const [deletingEmployeeDocumentId, setDeletingEmployeeDocumentId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);   // the employee awaiting "Remove?" confirmation
   const saveInFlight = useRef(false);
   const resetInFlight = useRef(false);
   const deptInFlight = useRef(false);
@@ -352,7 +365,6 @@ const EmployeesPage = ({
       return;
     }
     if (deleteInFlight.current.has(employeeDocumentId)) return;
-    if (!window.confirm("Remove this employee?")) return;
 
     deleteInFlight.current.add(employeeDocumentId);
     setDeletingEmployeeDocumentId(employeeDocumentId);
@@ -378,171 +390,123 @@ const EmployeesPage = ({
     }
   };
 
+  const addButton = <Btn onClick={openAdd}><Plus size={16} aria-hidden="true" />Add employee</Btn>;
+  const emptyState = scoped.length === 0 ? (
+    <EmptyState
+      icon={Users}
+      title="No employees yet"
+      description={myAssignableRoles.length > 0 ? "Add your first employee to start building the team. They will sign in with the temporary password you set." : "Employees you can see will be listed here."}
+    >
+      {myAssignableRoles.length > 0 && addButton}
+    </EmptyState>
+  ) : filtered.length === 0 ? (
+    <EmptyState icon={SearchX} title="No employees match" description="Nothing matches that search and department. Try different words or clear the filters.">
+      <Btn variant="ghost" onClick={() => { setSearch(""); setDeptFilter(""); }}>Clear filters</Btn>
+    </EmptyState>
+  ) : null;
+  const isHrOrAdmin = user.role === "admin" || user.role === "hr";
+
   // ─────────────────────────────────────────────────────────────────
   return (
     <div>
-
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>Employees</div>
-          <div style={{ fontSize: 12, color: T.muted }}>
-            {scoped.filter(e => e.status === "active").length} active · {scoped.length} total
-          </div>
-        </div>
-        {myAssignableRoles.length > 0 && <Btn onClick={openAdd}><Plus size={14} />Add Employee</Btn>}
-      </div>
+      <PageHeader
+        title="Employees"
+        description={`${scoped.filter(e => e.status === "active").length} active · ${scoped.length} total`}
+        actions={myAssignableRoles.length > 0 ? addButton : null}
+      />
 
       {notice && (
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-            marginBottom: 16,
-            padding: "12px 14px",
-            borderRadius: 8,
-            border: `1px solid ${notice.type === "success" ? T.success : T.warning}`,
-            background: notice.type === "success" ? T.successGlow : T.warningTint,
-            color: notice.type === "success" ? T.success : T.warning,
-            fontSize: 13,
-            fontWeight: 600,
-          }}
-        >
-          <span style={{ overflowWrap: "anywhere" }}>{notice.message}</span>
+        <div style={{ marginBottom: 16 }}>
+          <FormFeedback status={notice.type === "success" ? "success" : "warning"}>{notice.message}</FormFeedback>
         </div>
       )}
 
       {/* ── Search + Department filter ──────────────────────────── */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-
-        {/* Search */}
-        <div style={{ position: "relative", flex: 1, minWidth: 200, maxWidth: 320 }}>
-          <Search size={14} color={T.muted} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search by name, dept, ID…"
-            style={{ width: "100%", background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 12px 8px 32px", color: T.text, fontSize: 13, outline: "none" }}
-          />
-        </div>
-
-        {/* Department filter dropdown ← new */}
+      <FilterBar>
+        <SearchBar value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, department or ID…" />
         <select
+          className="select-field employees-filter"
+          aria-label="Filter by department"
           value={deptFilter}
           onChange={e => { setDeptFilter(e.target.value); }}
-          style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 12px", color: deptFilter ? T.text : T.muted, fontSize: 13, outline: "none", minWidth: 190, cursor: "pointer" }}
         >
-          <option value="">All Departments</option>
+          <option value="">All departments</option>
           {activeDepts.map(d => (
             <option key={d.id} value={d.name}>{d.name}</option>
           ))}
         </select>
-
-        {/* Clear filter — only shown when active */}
-        {deptFilter && (
-          <button
-            onClick={() => setDeptFilter("")}
-            style={{ background: T.dangerGlow, border: "none", color: T.danger, padding: "8px 12px", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
-          >
-            Clear filter
-          </button>
-        )}
-      </div>
+        {deptFilter && <Btn variant="ghost" onClick={() => setDeptFilter("")}>Clear filter</Btn>}
+      </FilterBar>
 
       {/* ── Table ──────────────────────────────────────────────── */}
-      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table className="data-table">
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                {["Employee", "Dept", "Position", "Salary", "Status", "Role", "Action"].map(h => (
-                  <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: 0.8, whiteSpace: "nowrap" }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={7} style={{ padding: "40px 16px", textAlign: "center", color: T.muted, fontSize: 13 }}>
-                    No employees match your search.
-                  </td>
-                </tr>
-              ) : filtered.map(emp => (
-                <tr
-                  key={emp.id}
-                  style={{ borderBottom: `1px solid ${T.border}`, transition: "background .15s" }}
-                  onMouseEnter={e => (e.currentTarget.style.background = T.cardHover)}
-                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                >
-                  <td style={{ padding: "12px 16px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <Avatar emp={emp} size={34} />
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{emp.name}</div>
-                        <div style={{ fontSize: 11, color: T.muted }}>{emp.empId}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: T.mutedLight }}>{emp.dept}</td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: T.mutedLight }}>{emp.pos}</td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: T.text, fontWeight: 600 }}>{fmt(emp.basic)}</td>
-                  <td style={{ padding: "12px 16px" }}><Badge s={emp.status} /></td>
-                  <td style={{ padding: "12px 16px" }}><Badge s={emp.role}   /></td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={() => setViewEmp(emp)} style={{ background: T.primaryGlow, border: "none", color: T.primary, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><Eye    size={13} /></button>
-                      {(user.role === "admin" || user.role === "hr" || canManageEmployee(user, emp)) && (
-                        <button
-                          onClick={() => openEdit(emp)}
-                          aria-label={`Edit ${emp.name || "employee"}`}
-                          title={canonicalEmployeeDocumentId(emp)
-                            ? "Edit employee"
-                            : "Canonical employee identifier unavailable"}
-                          style={{ background: T.warningTint, border: "none", color: T.warning, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}
-                        ><Edit size={13} /></button>
-                      )}
-                      {canResetPassword(user, emp) && (
-                        <button
-                          onClick={() => openReset(emp)}
-                          aria-label={`Reset password for ${emp.name || "employee"}`}
-                          title="Reset password"
-                          style={{ background: T.primaryGlow, border: "none", color: T.primary, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}
-                        ><KeyRound size={13} /></button>
-                      )}
-                      {(user.role === "admin" || user.role === "hr") && (
-                        <button
-                          onClick={() => del(emp)}
-                          disabled={deletingEmployeeDocumentId === canonicalEmployeeDocumentId(emp)}
-                          aria-label={`Delete ${emp.name || "employee"}`}
-                          title={canonicalEmployeeDocumentId(emp)
-                            ? "Delete employee"
-                            : "Canonical employee identifier unavailable"}
-                          style={{ background: T.dangerGlow, border: "none", color: T.danger, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}
-                        ><Trash2 size={13} /></button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable label="Employees" empty={emptyState}>
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Department</th>
+            <th>Position</th>
+            <th className="cell-number">Salary</th>
+            <th>Status</th>
+            <th>Role</th>
+            <th><span className="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map(emp => (
+            <tr key={emp.id}>
+              <td data-primary><PersonCell emp={emp} sub={emp.empId} /></td>
+              <td data-label="Department" style={{ color: T.mutedLight }}>{emp.dept}</td>
+              <td data-label="Position" style={{ color: T.mutedLight }}>{emp.pos}</td>
+              <td data-label="Salary" className="cell-number">{fmt(emp.basic)}</td>
+              <td data-label="Status"><Badge s={emp.status} /></td>
+              <td data-label="Role"><Badge s={emp.role} /></td>
+              <td className="cell-actions">
+                <div className="row-actions">
+                  <IconButton icon={Eye} label={`View ${emp.name || "employee"}`} onClick={() => setViewEmp(emp)} />
+                  {(isHrOrAdmin || canManageEmployee(user, emp)) && (
+                    <IconButton
+                      icon={Pencil}
+                      label={`Edit ${emp.name || "employee"}`}
+                      disabled={!canonicalEmployeeDocumentId(emp)}
+                      onClick={() => openEdit(emp)}
+                    />
+                  )}
+                  {canResetPassword(user, emp) && (
+                    <IconButton icon={KeyRound} label={`Reset password for ${emp.name || "employee"}`} onClick={() => openReset(emp)} />
+                  )}
+                  {isHrOrAdmin && (
+                    <IconButton
+                      icon={Trash2}
+                      variant="danger"
+                      label={`Delete ${emp.name || "employee"}`}
+                      disabled={deletingEmployeeDocumentId === canonicalEmployeeDocumentId(emp) || !canonicalEmployeeDocumentId(emp)}
+                      onClick={() => setDeleteTarget(emp)}
+                    />
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </DataTable>
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Remove this employee?"
+          message={`${deleteTarget.name || "This employee"} will lose access and be removed from the directory. This cannot be undone.`}
+          confirmLabel="Remove employee"
+          onConfirm={() => { const target = deleteTarget; setDeleteTarget(null); del(target); }}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
 
       {/* ── Add / Edit Modal ─────────────────────────────────────── */}
       {(modal === "add" || modal === "edit") && (
-        <Modal title={modal === "add" ? "Add Employee" : "Edit Employee"} onClose={closeModal} wide>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-            <Input label="Full Name"    value={form.name       || ""} onChange={e => setForm(p => ({ ...p, name:       e.target.value }))} disabled={saving} />
+        <Modal title={modal === "add" ? "Add employee" : "Edit employee"} onClose={closeModal} wide>
+          <div className="form-grid">
+            <Input label="Full name"    value={form.name       || ""} onChange={e => setForm(p => ({ ...p, name:       e.target.value }))} disabled={saving} />
             <Input label="Email"        value={form.email      || ""} onChange={e => setForm(p => ({ ...p, email:      e.target.value }))} type="email" disabled={saving} />
-            <Input label="Phone"        value={form.phone      || ""} onChange={e => setForm(p => ({ ...p, phone:      e.target.value }))} disabled={saving} />
+            <Input label="Phone"        value={form.phone      || ""} onChange={e => setForm(p => ({ ...p, phone:      e.target.value }))} type="tel" disabled={saving} />
 
             {/* Department (D42): admin can also create one here; HR sees a hint; manager/TL are locked to their own. */}
             <div>
@@ -557,28 +521,27 @@ const EmployeesPage = ({
                 disabled={deptLocked || saving}
                 hint={deptChoices.hint || undefined}
               >
-                {!deptLocked && <option value="">— Select Department —</option>}
+                {!deptLocked && <option value="">Select a department</option>}
                 {deptChoices.options.map(option => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
                 {modal === "add" && deptChoices.canCreate && (
-                  <option value={CREATE_DEPARTMENT_VALUE}>+ Create department…</option>
+                  <option value={CREATE_DEPARTMENT_VALUE}>Create a new department…</option>
                 )}
               </Select>
               {modal === "add" && deptChoices.canCreate && creatingDept && (
-                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <Input
-                      label="New department name"
-                      value={newDeptName}
-                      onChange={e => { setNewDeptName(e.target.value); setDeptError(""); }}
-                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); createDepartment(); } }}
-                      error={deptError || undefined}
-                      disabled={saving || deptSaving}
-                      autoFocus
-                    />
-                  </div>
-                  <div style={{ display: "flex", gap: 6, paddingTop: 22 }}>
+                <div className="inline-create">
+                  <Input
+                    className="inline-create__field"
+                    label="New department name"
+                    value={newDeptName}
+                    onChange={e => { setNewDeptName(e.target.value); setDeptError(""); }}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); createDepartment(); } }}
+                    error={deptError || undefined}
+                    disabled={saving || deptSaving}
+                    autoFocus
+                  />
+                  <div className="inline-create__actions">
                     <Btn sm onClick={createDepartment} disabled={saving || deptSaving}>
                       {deptSaving ? "Creating…" : "Create"}
                     </Btn>
@@ -589,9 +552,9 @@ const EmployeesPage = ({
             </div>
 
             <Input label="Position"     value={form.pos        || ""} onChange={e => setForm(p => ({ ...p, pos:        e.target.value }))} disabled={saving} />
-            <Input label="Basic Salary" value={form.basic      || ""} onChange={e => setForm(p => ({ ...p, basic:      e.target.value }))} type="number" disabled={saving || (modal === "edit" && user.role !== "admin" && user.role !== "hr")} />
-            <Input label="Allowances"   value={form.allowances || ""} onChange={e => setForm(p => ({ ...p, allowances: e.target.value }))} type="number" disabled={saving || (modal === "edit" && user.role !== "admin" && user.role !== "hr")} />
-            <Input label="Join Date"    value={form.joinDate   || ""} onChange={e => setForm(p => ({ ...p, joinDate:   e.target.value }))} type="date" disabled={saving} />
+            <Input label="Basic salary" value={form.basic      || ""} onChange={e => setForm(p => ({ ...p, basic:      e.target.value }))} type="number" inputMode="numeric" disabled={saving || (modal === "edit" && user.role !== "admin" && user.role !== "hr")} />
+            <Input label="Allowances"   value={form.allowances || ""} onChange={e => setForm(p => ({ ...p, allowances: e.target.value }))} type="number" inputMode="numeric" disabled={saving || (modal === "edit" && user.role !== "admin" && user.role !== "hr")} />
+            <Input label="Join date"    value={form.joinDate   || ""} onChange={e => setForm(p => ({ ...p, joinDate:   e.target.value }))} type="date" disabled={saving} />
             {/* Role choices depend on who's creating/editing — a manager can
                 only make Team Leads, a TL can only add Employees, etc. */}
             <Select
@@ -607,7 +570,7 @@ const EmployeesPage = ({
               disabled={saving}
             >
               {myAssignableRoles.map(r => (
-                <option key={r} value={r}>{r === "hr" ? "HR" : r === "tl" ? "Team Lead" : r.charAt(0).toUpperCase() + r.slice(1)}</option>
+                <option key={r} value={r}>{resolveBadge(r).label}</option>
               ))}
             </Select>
             <Select label="Status" value={form.status || "active"} onChange={e => setForm(p => ({ ...p, status: e.target.value }))} disabled={saving}>
@@ -626,41 +589,26 @@ const EmployeesPage = ({
             )}
             {modal === "add" && form.role === "employee" && user.role !== "tl" && (
               <Select
-                label="Team Lead (optional)"
+                label="Team lead (optional)"
                 value={form.teamLeadId || ""}
                 onChange={e => setForm(p => ({ ...p, teamLeadId: e.target.value }))}
                 disabled={saving || !form.dept}
               >
-                <option value="">— No Team Lead —</option>
+                <option value="">No team lead</option>
                 {teamLeadOptions.map(teamLead => (
                   <option key={teamLead.id} value={String(teamLead.id)}>{teamLead.name}</option>
                 ))}
               </Select>
             )}
           </div>
-          {formError && (
-            <div
-              role="alert"
-              style={{
-                marginTop: 8,
-                padding: "10px 12px",
-                borderRadius: 8,
-                background: T.dangerGlow,
-                color: T.danger,
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              {formError}
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+          <FormFeedback>{formError}</FormFeedback>
+          <div className="modal-actions">
             <Btn variant="ghost" onClick={closeModal} disabled={saving}>Cancel</Btn>
             <Btn onClick={save} disabled={saving}>
-              <Check size={13} />
+              <Check size={16} aria-hidden="true" />
               {saving
                 ? modal === "add" ? "Creating…" : "Saving…"
-                : modal === "add" ? "Create Employee" : "Save Changes"}
+                : modal === "add" ? "Create employee" : "Save changes"}
             </Btn>
           </div>
         </Modal>
@@ -668,11 +616,11 @@ const EmployeesPage = ({
 
       {/* ── Reset password modal (D41) ──────────────────────────── */}
       {resetTarget && (
-        <Modal title="Reset Password" onClose={closeReset}>
-          <div style={{ fontSize: 13, color: T.mutedLight, lineHeight: 1.5, marginBottom: 12 }}>
-            Set a new temporary password for <strong style={{ color: T.text }}>{resetTarget.name}</strong>. Their
+        <Modal title="Reset password" onClose={closeReset}>
+          <p className="employees-lede">
+            Set a new temporary password for <strong>{resetTarget.name}</strong>. Their
             current sessions end, and they must choose their own password the next time they sign in.
-          </div>
+          </p>
           <Input
             label="Temporary password"
             value={resetPassword}
@@ -683,26 +631,11 @@ const EmployeesPage = ({
             disabled={resetting}
             autoFocus
           />
-          {resetError && (
-            <div
-              role="alert"
-              style={{
-                marginTop: 8,
-                padding: "10px 12px",
-                borderRadius: 8,
-                background: T.dangerGlow,
-                color: T.danger,
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              {resetError}
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+          <FormFeedback>{resetError}</FormFeedback>
+          <div className="modal-actions">
             <Btn variant="ghost" onClick={closeReset} disabled={resetting}>Cancel</Btn>
             <Btn onClick={submitReset} disabled={resetting}>
-              <KeyRound size={13} />
+              <KeyRound size={16} aria-hidden="true" />
               {resetting ? "Resetting…" : "Reset password"}
             </Btn>
           </div>
@@ -711,32 +644,26 @@ const EmployeesPage = ({
 
       {/* ── View Modal ───────────────────────────────────────────── */}
       {viewEmp && (
-        <Modal title="Employee Profile" onClose={() => setViewEmp(null)}>
-          <div style={{ textAlign: "center", marginBottom: 20 }}>
+        <Modal title="Employee profile" onClose={() => setViewEmp(null)}>
+          <div className="employees-hero">
             <Avatar emp={viewEmp} size={64} />
-            <div style={{ fontSize: 18, fontWeight: 800, color: T.text, marginTop: 10 }}>{viewEmp.name}</div>
-            <div style={{ fontSize: 12, color: T.muted }}>{viewEmp.empId}</div>
-            <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center" }}>
+            <div className="employees-hero__name">{viewEmp.name}</div>
+            <div className="employees-hero__id">{viewEmp.empId}</div>
+            <div className="employees-hero__badges">
               <Badge s={viewEmp.status} /><Badge s={viewEmp.role} />
             </div>
           </div>
-          {[
+          <DetailList items={[
             ["Department",   viewEmp.dept],
             ["Position",     viewEmp.pos],
             ["Email",        viewEmp.email],
             ["Phone",        viewEmp.phone],
-            ["Basic Salary", fmt(viewEmp.basic)],
+            ["Basic salary", fmt(viewEmp.basic)],
             ["Allowances",   fmt(viewEmp.allowances)],
-            ["Join Date",    fdate(viewEmp.joinDate)],
-          ].map(([k, v]) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: `1px solid ${T.border}` }}>
-              <span style={{ fontSize: 12, color: T.muted, fontWeight: 600 }}>{k}</span>
-              <span style={{ fontSize: 13, color: T.text,  fontWeight: 500 }}>{v}</span>
-            </div>
-          ))}
+            ["Joined",       fdate(viewEmp.joinDate)],
+          ]} />
         </Modal>
       )}
-
     </div>
   );
 };

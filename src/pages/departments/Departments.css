@@ -1,0 +1,76 @@
+.dept-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.dept-name__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.dept-icon {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  background: var(--color-primary-tint);
+}
+
+.dept-icon--lg {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-xl);
+}
+
+.dept-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+  text-align: center;
+}
+
+.dept-hero__name {
+  color: var(--color-text);
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-semibold);
+}
+
+.dept-hero__description {
+  max-width: 48ch;
+  color: var(--color-muted-light);
+  font-size: var(--font-size-md);
+}
+
+.dept-people {
+  margin-top: var(--space-8);
+}
+
+.dept-people__title {
+  margin-bottom: var(--space-2);
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.dept-people__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dept-people__none {
+  padding: var(--space-8) 0 var(--space-2);
+  color: var(--color-muted-light);
+  text-align: center;
+}

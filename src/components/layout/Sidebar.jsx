@@ -1,5 +1,6 @@
-import { Briefcase, ChevronRight, LogOut } from "lucide-react";
-import { T } from "../../theme/theme";
+import { useRef } from "react";
+import { Briefcase, LogOut } from "lucide-react";
+import { useSlidingIndicator } from "../../hooks/motion/useSlidingIndicator";
 import Avatar from "../avatar/Avatar";
 import Badge from "../badge/Badge";
 
@@ -12,7 +13,11 @@ const Sidebar = ({
   onNavigate,
   onClose,
   onLogout,
-}) => (
+}) => {
+  const navRef = useRef(null);
+  useSlidingIndicator(navRef, page, "y");
+
+  return (
   <>
     <aside
       className={[
@@ -20,33 +25,22 @@ const Sidebar = ({
         collapsed && "sidebar--collapsed",
         mobileOpen && "sidebar--mobile-open",
       ].filter(Boolean).join(" ")}
-      style={{
-        background: T.sidebar,
-        borderRight: "1px solid " + T.sidebarBorder,
-      }}
     >
-      <div
-        className="sidebar-header"
-        style={{ borderBottom: "1px solid " + T.sidebarBorder }}
-      >
+      <div className="sidebar-header">
         <div className="sidebar-logo">
-          <div
-            className="logo-box"
-            style={{
-              background: "linear-gradient(135deg, " + T.primary + ", " + T.purple + ")",
-            }}
-          >
-            <Briefcase size={16} color={T.white} />
+          <div className="logo-box">
+            <Briefcase size={16} aria-hidden="true" />
           </div>
           {!collapsed && (
-            <div className="sidebar-brand" style={{ color: T.text }}>
-              SIGMA HRM <span style={{ color: T.primary }}>Portal</span>
+            <div className="sidebar-brand">
+              Sigma HRM <span className="sidebar-brand__sub">Portal</span>
             </div>
           )}
         </div>
       </div>
 
-      <nav className="nav" aria-label="Main navigation">
+      <nav ref={navRef} className="nav" aria-label="Main navigation">
+        <span className="nav-indicator" data-indicator aria-hidden="true" />
         {navigation.map((item) => {
           const active = page === item.id;
           const Icon = item.icon;
@@ -56,34 +50,25 @@ const Sidebar = ({
               key={item.id}
               type="button"
               onClick={() => onNavigate(item.id)}
-              className="nav-btn"
-              style={{
-                background: active ? T.primaryTint : "transparent",
-                color: active ? T.primary : T.muted,
-                fontWeight: active ? 700 : 500,
-              }}
+              className={"nav-btn" + (active ? " nav-btn--active" : "")}
+              aria-current={active ? "page" : undefined}
+              data-active={active ? "true" : undefined}
+              aria-label={collapsed ? item.label : undefined}
+              title={collapsed ? item.label : undefined}
             >
-              <Icon size={16} />
+              <Icon size={16} aria-hidden="true" />
               {!collapsed && item.label}
-              {active && !collapsed && (
-                <ChevronRight size={12} className="nav-btn__indicator" />
-              )}
             </button>
           );
         })}
       </nav>
 
-      <div
-        className="sidebar-footer"
-        style={{ borderTop: "1px solid " + T.sidebarBorder }}
-      >
+      <div className="sidebar-footer">
         <div className="user-box">
           <Avatar emp={user} size={32} />
           {!collapsed && (
             <div className="user-box__details">
-              <div className="user-box__name" style={{ color: T.text }}>
-                {user.name}
-              </div>
+              <div className="user-box__name">{user.name}</div>
               <Badge s={user.role} />
             </div>
           )}
@@ -93,9 +78,10 @@ const Sidebar = ({
           type="button"
           onClick={onLogout}
           className="nav-btn"
-          style={{ color: T.muted, fontFamily: "inherit" }}
+          aria-label={collapsed ? "Sign out" : undefined}
+          title={collapsed ? "Sign out" : undefined}
         >
-          <LogOut size={16} />
+          <LogOut size={16} aria-hidden="true" />
           {!collapsed && "Sign out"}
         </button>
       </div>
@@ -108,6 +94,7 @@ const Sidebar = ({
       />
     )}
   </>
-);
+  );
+};
 
 export default Sidebar;

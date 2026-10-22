@@ -1,16 +1,16 @@
 import { useRef, useState } from "react";
 import { FolderKanban, Pencil, Plus, Trash2 } from "lucide-react";
 
+import "./Projects.css";
 import {
-  ActionGroup,
   Badge,
   Btn,
   ConfirmDialog,
   DataTable,
   EmptyState,
-  FormActions,
   FormFeedback,
   FormField,
+  IconButton,
   Input,
   Modal,
   PageHeader,
@@ -19,6 +19,7 @@ import {
 } from "../../components";
 import { T } from "../../theme/theme";
 import { canManageProject, scopeProjects } from "../../utils/permissions";
+import { useToast } from "../../components/toast/toastContext";
 
 const PROJECT_STATUSES = [
   { value: "draft", label: "Draft" },
@@ -78,6 +79,7 @@ const ProjectModal = ({
   project,
   onClose,
 }) => {
+  const toast = useToast();
   const isEditing = Boolean(project);
   const [form, setForm] = useState(() => getInitialProjectForm(user, project));
   const [errors, setErrors] = useState({});
@@ -200,6 +202,7 @@ const ProjectModal = ({
       setForm(getInitialProjectForm(user));
       setErrors({});
       onClose();
+      toast.success(isEditing ? "Project saved" : "Project created");
     } catch (error) {
       setSubmitError(error?.message || `Unable to ${isEditing ? "update" : "create"} the project. Please try again.`);
     } finally {
@@ -208,9 +211,9 @@ const ProjectModal = ({
   };
 
   return (
-    <Modal title={isEditing ? "Edit Project" : "Create Project"} onClose={closeModal} wide>
+    <Modal title={isEditing ? "Edit project" : "Create project"} onClose={closeModal} wide>
       <form onSubmit={saveProject}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0 16px" }}>
+        <div className="form-grid">
           <Input
             label="Project title"
             value={form.title}
@@ -224,13 +227,13 @@ const ProjectModal = ({
             disabled={fixedDepartment}
             onChange={(event) => changeDepartment(event.target.value)}
           >
-            <option value="">Select department</option>
+            <option value="">Select a department</option>
             {departmentOptions.map((department) => (
               <option key={department} value={department}>{department}</option>
             ))}
           </Select>
           <Select
-            label="Team Lead"
+            label="Team lead"
             value={user.role === "tl" ? String(user.id) : form.teamLeadId}
             disabled={user.role === "tl" || !selectedDepartment}
             onChange={(event) => updateField("teamLeadId", event.target.value)}
@@ -238,7 +241,7 @@ const ProjectModal = ({
             {user.role !== "tl" && <option value="">Unassigned</option>}
             {teamLeadOptions.map((employee) => (
               <option key={String(employee.id)} value={String(employee.id)}>
-                {employee.name || employee.email || "Unnamed Team Lead"}
+                {employee.name || employee.email || "Unnamed team lead"}
               </option>
             ))}
           </Select>
@@ -282,7 +285,7 @@ const ProjectModal = ({
         >
           <select
             id="project-assigned-employees"
-            className="select-field"
+            className="select-field projects-multiselect"
             multiple
             size={Math.min(Math.max(employeeOptions.length, 3), 6)}
             value={form.assignedEmployeeIds}
@@ -293,12 +296,6 @@ const ProjectModal = ({
               "assignedEmployeeIds",
               Array.from(event.target.selectedOptions, (option) => String(option.value)),
             )}
-            style={{
-              minHeight: 96,
-              background: T.card,
-              border: `1px solid ${errors.assignedEmployeeIds ? T.danger : T.border}`,
-              color: T.text,
-            }}
           >
             {employeeOptions.map((employee) => (
               <option key={String(employee.id)} value={String(employee.id)}>
@@ -309,14 +306,14 @@ const ProjectModal = ({
         </FormField>
 
         <FormFeedback>{submitError}</FormFeedback>
-        <FormActions>
+        <div className="modal-actions">
           <Btn variant="ghost" onClick={closeModal} disabled={saving}>Cancel</Btn>
           <Btn type="submit" disabled={saving}>
             {saving
               ? isEditing ? "Saving…" : "Creating…"
-              : isEditing ? "Save Changes" : "Create Project"}
+              : isEditing ? "Save changes" : "Create project"}
           </Btn>
-        </FormActions>
+        </div>
       </form>
     </Modal>
   );
@@ -331,6 +328,7 @@ const ProjectsPage = ({
   updateProject,
   deleteProject,
 }) => {
+  const toast = useToast();
   const [projectModal, setProjectModal] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
@@ -344,21 +342,7 @@ const ProjectsPage = ({
   const employeeById = new Map(
     employees.map((employee) => [String(employee.id), employee]),
   );
-  const headerCellStyle = {
-    padding: "12px 16px",
-    color: T.muted,
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: 0.8,
-    textAlign: "left",
-    textTransform: "uppercase",
-    whiteSpace: "nowrap",
-  };
-  const cellStyle = {
-    padding: "14px 16px",
-    color: T.mutedLight,
-    fontSize: 13,
-  };
+  const createButton = <Btn onClick={() => setProjectModal({ project: null })}><Plus size={16} aria-hidden="true" />Create project</Btn>;
 
   const openDeleteDialog = (project) => {
     if (deletionInProgress.current) return;
@@ -399,6 +383,7 @@ const ProjectsPage = ({
       await deleteProject(latestProject.id);
       setDeleteTarget(null);
       setDeleteError("");
+      toast.success("Project deleted");
     } catch (error) {
       setDeleteError(error?.message || "Unable to delete the project. Please try again.");
     } finally {
@@ -412,91 +397,78 @@ const ProjectsPage = ({
       <PageHeader
         title="Projects"
         description={`${scopedProjects.length} project${scopedProjects.length === 1 ? "" : "s"} in your scope`}
-        actions={canCreateProject ? (
-          <Btn onClick={() => setProjectModal({ project: null })}>
-            <Plus size={14} />Create Project
-          </Btn>
-        ) : null}
+        actions={canCreateProject ? createButton : null}
       />
 
-      {scopedProjects.length === 0 ? (
-        <EmptyState
-          icon={FolderKanban}
-          title="No projects available"
-          description="There are no projects assigned to your current scope."
-        />
-      ) : (
-        <DataTable>
-          <thead>
-            <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-              {["Project", "Department", "Status", "Team Lead", "Assigned Employees", showActionsColumn && "Actions"]
-                .filter(Boolean)
-                .map((heading) => (
-                <th key={heading} style={headerCellStyle}>{heading}</th>
-                ))}
-            </tr>
-          </thead>
-          <tbody>
-            {scopedProjects.map((project, index) => {
-              const assignedEmployeeIds = Array.isArray(project.assignedEmployeeIds)
-                ? project.assignedEmployeeIds
-                : [];
-              const assignedEmployeeNames = assignedEmployeeIds
-                .map((id) => employeeById.get(String(id))?.name)
-                .filter(Boolean);
-              const teamLead = project.teamLeadId == null
-                ? null
-                : employeeById.get(String(project.teamLeadId));
-              const canEditProject = canManageProject(user, project, employees);
-              const canDeleteProject = user.role !== "employee" && canEditProject;
+      <DataTable
+        label="Projects"
+        empty={scopedProjects.length === 0 ? (
+          <EmptyState
+            icon={FolderKanban}
+            title="No projects yet"
+            description={canCreateProject
+              ? "Create a project, assign people to it, and its KPIs and progress will be tracked from here."
+              : "Projects you are assigned to will be listed here."}
+          >
+            {canCreateProject && createButton}
+          </EmptyState>
+        ) : null}
+      >
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Department</th>
+            <th>Status</th>
+            <th>Team lead</th>
+            <th className="cell-number">People</th>
+            {showActionsColumn && <th><span className="sr-only">Actions</span></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {scopedProjects.map((project, index) => {
+            const assignedEmployeeIds = Array.isArray(project.assignedEmployeeIds)
+              ? project.assignedEmployeeIds
+              : [];
+            const assignedEmployeeNames = assignedEmployeeIds
+              .map((id) => employeeById.get(String(id))?.name)
+              .filter(Boolean);
+            const teamLead = project.teamLeadId == null
+              ? null
+              : employeeById.get(String(project.teamLeadId));
+            const canEditProject = canManageProject(user, project, employees);
+            const canDeleteProject = user.role !== "employee" && canEditProject;
+            const projectName = project.title || project.name || "Untitled project";
 
-              return (
-                <tr
-                  key={`${project.id ?? project._docId ?? "project"}-${index}`}
-                  style={{ borderBottom: `1px solid ${T.border}` }}
+            return (
+              <tr key={`${project.id ?? project._docId ?? "project"}-${index}`}>
+                <td data-primary style={{ fontWeight: 500 }}>{projectName}</td>
+                <td data-label="Department" style={{ color: T.mutedLight }}>{project.department || "Unassigned"}</td>
+                <td data-label="Status"><Badge s={project.status || "Unknown"} /></td>
+                <td data-label="Team lead" style={{ color: T.mutedLight }}>{teamLead?.name || "Unassigned"}</td>
+                <td
+                  data-label="People"
+                  className="cell-number"
+                  title={assignedEmployeeNames.length ? assignedEmployeeNames.join(", ") : undefined}
                 >
-                  <td style={{ ...cellStyle, color: T.text, fontWeight: 700 }}>
-                    {project.title || project.name || "Untitled project"}
+                  {assignedEmployeeIds.length}
+                </td>
+                {showActionsColumn && (
+                  <td className="cell-actions">
+                    <div className="row-actions">
+                      {canEditProject && (
+                        <IconButton icon={Pencil} label={`Edit ${projectName}`} onClick={() => setProjectModal({ project })} />
+                      )}
+                      {canDeleteProject && (
+                        <IconButton icon={Trash2} variant="danger" label={`Delete ${projectName}`} onClick={() => openDeleteDialog(project)} />
+                      )}
+                    </div>
                   </td>
-                  <td style={cellStyle}>{project.department || "Unassigned"}</td>
-                  <td style={cellStyle}><Badge s={project.status || "Unknown"} /></td>
-                  <td style={cellStyle}>{teamLead?.name || "Unassigned"}</td>
-                  <td
-                    style={{ ...cellStyle, color: T.text, fontWeight: 600 }}
-                    title={assignedEmployeeNames.length ? assignedEmployeeNames.join(", ") : undefined}
-                  >
-                    {assignedEmployeeIds.length}
-                  </td>
-                  {showActionsColumn && (
-                    <td style={cellStyle}>
-                      <ActionGroup>
-                        {canEditProject && (
-                          <Btn
-                            variant="outline"
-                            sm
-                            onClick={() => setProjectModal({ project })}
-                          >
-                            <Pencil size={13} />Edit
-                          </Btn>
-                        )}
-                        {canDeleteProject && (
-                          <Btn
-                            variant="danger"
-                            sm
-                            onClick={() => openDeleteDialog(project)}
-                          >
-                            <Trash2 size={13} />Delete
-                          </Btn>
-                        )}
-                      </ActionGroup>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </DataTable>
-      )}
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </DataTable>
 
       {projectModal && (
         <ProjectModal
@@ -512,7 +484,7 @@ const ProjectsPage = ({
 
       {deleteTarget && (
         <ConfirmDialog
-          title="Delete Project"
+          title="Delete project"
           message={(
             <div>
               <div>
@@ -521,7 +493,7 @@ const ProjectsPage = ({
               <FormFeedback>{deleteError}</FormFeedback>
             </div>
           )}
-          confirmLabel={deleting ? "Deleting…" : "Delete Project"}
+          confirmLabel={deleting ? "Deleting…" : "Delete project"}
           onConfirm={confirmDeleteProject}
           onClose={closeDeleteDialog}
         />

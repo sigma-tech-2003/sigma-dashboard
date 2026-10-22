@@ -4,9 +4,10 @@
 
 import "./LoginPage.css";
 import { useRef, useState } from "react";
-import { T } from "../../theme/theme";
 import { Briefcase } from "lucide-react";
 import Input from "../../components/input/Input";
+import Btn from "../../components/btn/Btn";
+import FormFeedback from "../../components/form-feedback/FormFeedback";
 import { signIn, signOutUser } from "../../services/authService";
 import {
   AuthSessionError,
@@ -21,7 +22,7 @@ const LOGIN_ROLES = [
   { value: "admin", label: "Admin" },
   { value: "hr", label: "HR" },
   { value: "manager", label: "Manager" },
-  { value: "tl", label: "Team Lead" },
+  { value: "tl", label: "Team lead" },
   { value: "employee", label: "Employee" },
 ];
 const ROLE_REQUIRED_MESSAGE = new AuthSessionError("invalid-argument").message;
@@ -59,7 +60,8 @@ const LoginPage = () => {
   const [loading,      setLoading]      = useState(false);
   const loginInFlight = useRef(false);
 
-  const handleLogin = async () => {
+  const handleLogin = async (event) => {
+    event?.preventDefault();
     if (!selectedRole) { setErr(ROLE_REQUIRED_MESSAGE); return; }
     if (!email || !pass) { setErr("Please enter email and password."); return; }
     if (loginInFlight.current) return;
@@ -103,40 +105,50 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="login-page" style={{ background: T.bg }}>
+    <div className="login-page">
       <div className="login-wrapper">
 
         <div className="login-header">
-          <div
-            className="login-logo"
-            style={{
-              background: `linear-gradient(135deg,${T.primary},${T.purple})`,
-              boxShadow: `0 8px 32px ${T.primaryGlow}`,
-            }}
-          >
-            <Briefcase size={24} color={T.white} />
+          <div className="login-logo">
+            <Briefcase size={24} aria-hidden="true" />
           </div>
-
-          <div className="login-title" style={{ color: T.text }}>
-            SIGMA HRM <span style={{ color: T.primary }}>Portal</span>
-          </div>
-
-          <div className="login-subtitle" style={{ color: T.muted }}>
-            Human Resource Management System
-          </div>
+          <h1 className="login-title">Sigma HRM <span>Portal</span></h1>
+          <p className="login-subtitle">Human resource management</p>
         </div>
 
-        <div
-          className="login-card"
-          style={{ background: T.card, border: `1px solid ${T.border}` }}
-        >
-          <div className="login-heading" style={{ color: T.text }}>
-            Sign in to your account
+        <form className="login-card" onSubmit={handleLogin} noValidate>
+          <h2 className="login-heading">Sign in to your account</h2>
+
+          <div className="login-roles" role="group" aria-label="Sign in as">
+            <div className="login-roles__label">Sign in as</div>
+            <div className="login-roles__options">
+              {LOGIN_ROLES.map((role) => {
+                const isActive = selectedRole === role.value;
+
+                return (
+                  <button
+                    key={role.value}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => {
+                      setSelectedRole(role.value);
+                      setErr((currentError) =>
+                        currentError === ROLE_REQUIRED_MESSAGE ? "" : currentError,
+                      );
+                    }}
+                    className="login-role"
+                  >
+                    {role.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <Input
-            label="Email Address"
+            label="Email address"
             type="email"
+            autoComplete="username"
             placeholder="you@company.com"
             value={email}
             onChange={e => setEmail(e.target.value)}
@@ -145,84 +157,18 @@ const LoginPage = () => {
           <Input
             label="Password"
             type="password"
+            autoComplete="current-password"
             placeholder="••••••••"
             value={pass}
             onChange={e => setPass(e.target.value)}
           />
 
-          {err && (
-            <div
-              className="login-error"
-              role="alert"
-              style={{
-                background: T.dangerGlow,
-                border: `1px solid ${T.danger}30`,
-                color: T.danger,
-              }}
-            >
-              {err}
-            </div>
-          )}
+          <FormFeedback>{err}</FormFeedback>
 
-          <button
-            type="button"
-            onClick={handleLogin}
-            disabled={loading}
-            className="login-btn"
-            style={{
-              background: `linear-gradient(135deg,${T.primary},${T.purple})`,
-              color: T.white,
-              opacity: loading ? 0.7 : 1,
-            }}
-          >
-            {loading ? "Signing in…" : "Sign In →"}
-          </button>
-        </div>
-
-        <div
-          className="demo-box"
-          style={{ background: T.surface, border: `1px solid ${T.border}` }}
-        >
-          <div className="demo-title" style={{ color: T.muted }}>
-            Select your role
-          </div>
-
-          <div
-            className="demo-buttons"
-            role="group"
-            aria-label="Select your role"
-            style={{ flexWrap: "wrap" }}
-          >
-            {LOGIN_ROLES.map((role) => {
-              const isActive = selectedRole === role.value;
-
-              return (
-                <button
-                  key={role.value}
-                  type="button"
-                  aria-pressed={isActive}
-                  onClick={() => {
-                    setSelectedRole(role.value);
-                    setErr((currentError) =>
-                      currentError === ROLE_REQUIRED_MESSAGE ? "" : currentError,
-                    );
-                  }}
-                  className="demo-btn"
-                  style={{
-                    flex: "1 1 112px",
-                    background: isActive ? T.primaryTint : T.card,
-                    border: `1px solid ${isActive ? T.primary : T.border}`,
-                    color: isActive ? T.primary : T.mutedLight,
-                    boxShadow: isActive ? `0 0 0 2px ${T.primaryGlow}` : "none",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  {role.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+          <Btn type="submit" disabled={loading}>
+            {loading ? "Signing in…" : "Sign in"}
+          </Btn>
+        </form>
 
       </div>
     </div>

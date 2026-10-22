@@ -1,77 +1,19 @@
 import "./Badge.css";
-import { T } from "../../theme/theme";
+import { useRef } from "react";
+import { useChangePulse } from "../../hooks/motion/useChangePulse";
+import { resolveBadge } from "./badgeStatuses";
 
+// A status pill: a dot and a label in the tone's colour on a tint of itself. Colour is never the only signal; the label is
+// always there. When the status changes while it is on screen (Pending to Approved) the pill pops once.
 const Badge = ({ s }) => {
-  const map = {
-    active: {
-      bg: T.successGlow,
-      c: T.success,
-      label: "Active",
-    },
-    inactive: {
-      bg: T.dangerGlow,
-      c: T.danger,
-      label: "Inactive",
-    },
-    approved: {
-      bg: T.successGlow,
-      c: T.success,
-      label: "Approved",
-    },
-    rejected: {
-      bg: T.dangerGlow,
-      c: T.danger,
-      label: "Rejected",
-    },
-    pending: {
-      bg: T.warningGlow,
-      c: T.warning,
-      label: "Pending",
-    },
-    processed: {
-      bg: T.primaryTint,
-      c: T.primary,
-      label: "Processed",
-    },
-    draft: {
-      bg: T.mutedGlow,
-      c: T.muted,
-      label: "Draft",
-    },
-    admin: {
-      bg: T.purpleGlow,
-      c: T.purple,
-      label: "Admin",
-    },
-    hr: {
-      bg: T.secondaryGlow,
-      c: T.secondary,
-      label: "HR",
-    },
-    employee: {
-      bg: T.primaryGlow,
-      c: T.primary,
-      label: "Employee",
-    },
-  };
-
-  const m =
-    map[s?.toLowerCase()] || {
-      bg: T.mutedGlow,
-      c: T.muted,
-      label: s,
-    };
+  const ref = useRef(null);
+  const { tone, label } = resolveBadge(s);
+  useChangePulse(ref, label);
 
   return (
-    <span
-      className="badge"
-      style={{
-        background: m.bg,
-        color: m.c,
-        borderColor: `${m.c}30`,
-      }}
-    >
-      {m.label}
+    <span ref={ref} className={`badge badge--${tone}`}>
+      <span className="badge__dot" aria-hidden="true" />
+      {label}
     </span>
   );
 };

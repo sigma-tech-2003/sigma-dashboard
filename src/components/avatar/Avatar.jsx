@@ -8,8 +8,7 @@ const Avatar = ({ emp, size = 36 }) => (
       width: size,
       height: size,
       background: aColor(emp.id),
-      fontSize: size * 0.33,
-      border: `2px solid ${aColor(emp.id)}40`,
+      fontSize: Math.max(12, size * 0.38),
     }}
   >
     {initials(emp.name)}

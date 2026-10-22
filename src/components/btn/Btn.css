@@ -1,18 +1,95 @@
 .btn {
-  border-radius: var(--radius-md);
-  font-weight: var(--font-weight-semibold);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
-  transition: opacity var(--transition-base);
-}
-
-.btn-sm {
-  padding: var(--space-2) var(--space-5);
-  font-size: var(--font-size-xs);
-}
-
-.btn-md {
-  padding: var(--space-3) var(--space-7);
+  min-height: var(--control-h);
+  padding: 0 var(--space-6);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Small is 32px on a pointer, full target size on touch */
+.btn-sm {
+  min-height: calc(var(--control-h) - 4px);
+  padding: 0 var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+@media (max-width: 767px), (pointer: coarse) {
+  .btn-sm {
+    min-height: var(--control-h);
+  }
+}
+
+.btn--primary {
+  background: var(--color-primary);
+  color: var(--color-white);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.btn--ghost {
+  background: transparent;
+  border-color: var(--color-border-light);
+  color: var(--color-text);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--color-card-hover);
+  border-color: var(--color-muted);
+}
+
+.btn--outline {
+  background: transparent;
+  border-color: var(--color-primary-text);
+  color: var(--color-primary-text);
+}
+
+.btn--outline:hover:not(:disabled) {
+  background: var(--color-primary-tint);
+}
+
+.btn--success {
+  background: var(--color-success-fill);
+  color: var(--color-on-success);
+}
+
+.btn--danger {
+  background: var(--color-danger-fill);
+  color: var(--color-on-danger);
+}
+
+.btn--warning {
+  background: var(--color-warning-fill);
+  color: var(--color-on-warning);
+}
+
+.btn--success:hover:not(:disabled),
+.btn--danger:hover:not(:disabled),
+.btn--warning:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+/* Press: the button gives under the finger, and the focus ring grows in rather than snapping on */
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn,
+.icon-button {
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--dur-fast) var(--ease-out), outline-offset var(--dur-fast) var(--ease-out);
 }

@@ -1,27 +1,37 @@
 // src/pages/leave/LeavePage.jsx
 import { useState } from "react";
-import { Plus, Check, X } from "lucide-react";
+import { Plus, Check, X, CalendarDays, Ban } from "lucide-react";
 
 import { T } from "../../theme/theme";
 import { fdate } from "../../utils/helpers";
 import { can, scopeByEmployee } from "../../utils/permissions";
 import { usageCards } from "../../utils/leaveUsage";
 import Badge       from "../../components/badge/Badge";
-import Avatar      from "../../components/avatar/Avatar";
+import PersonCell  from "../../components/person-cell/PersonCell";
+import PageHeader  from "../../components/page-header/PageHeader";
+import Stat        from "../../components/stat/Stat";
+import DataTable   from "../../components/data-table/DataTable";
+import EmptyState  from "../../components/empty-state/EmptyState";
+import IconButton  from "../../components/icon-button/IconButton";
+import ConfirmDialog from "../../components/confirm-dialog/ConfirmDialog";
 import Modal       from "../../components/modal/Modal";
 import Input       from "../../components/input/Input";
 import Select      from "../../components/select/Select";
+import Textarea    from "../../components/textarea/Textarea";
 import Btn         from "../../components/btn/Btn";
 import FormFeedback from "../../components/form-feedback/FormFeedback";
 import { guardedSave, leaveDatesError } from "../../utils/saveErrors";
+import { useToast } from "../../components/toast/toastContext";
 
-const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leaveBalances }) => {
+const LeavePage = ({ leaves, addLeave, updateLeaveStatus, cancelLeave, employees, user, leaveBalances }) => {
+  const toast = useToast();
   const [modal, setModal] = useState(false);
   const [form,  setForm]  = useState({ type: "Annual" });
   const [applyError,    setApplyError]    = useState("");   // inside the Apply for Leave form
   const [applying,      setApplying]      = useState(false);
-  const [decisionError, setDecisionError] = useState("");   // above the table (approve / reject)
+  const [decisionError, setDecisionError] = useState("");   // above the table (approve / reject / cancel)
   const [deciding,      setDeciding]      = useState(false);
+  const [cancelling,    setCancelling]    = useState(null); // the request awaiting "Cancel this request?" confirmation
 
   const canApproveLeave = can(user, "approveLeave");
   // Admin/HR see all requests; manager sees their dept; tl sees their team;
@@ -62,6 +72,7 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
     }
     setModal(false);
     setForm({ type: "Annual" });
+    toast.success("Leave request sent");
   };
 
   const decide = async (id, status) => {
@@ -71,123 +82,138 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, employees, user, leave
     const result = await guardedSave(() => updateLeaveStatus(id, status), { fallback: "The decision could not be saved. Please try again." });
     setDeciding(false);
     if (!result.ok) setDecisionError(result.message);
+    else toast.success(status === "approved" ? "Leave approved" : "Leave rejected");
   };
+
+  // An employee withdrawing their own pending request. The server refuses it if it was decided in the meantime.
+  const cancelRequest = async () => {
+    if (deciding || !cancelling) return;
+    setDeciding(true);
+    setDecisionError("");
+    const result = await guardedSave(() => cancelLeave(cancelling.id), { fallback: "The request could not be cancelled. Please try again." });
+    setDeciding(false);
+    setCancelling(null);
+    if (!result.ok) setDecisionError(result.message);
+    else toast.success("Leave request cancelled");
+  };
+
+  const applyButton = <Btn onClick={openApply}><Plus size={16} aria-hidden="true" />Apply for leave</Btn>;
 
   return (
     <div>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>Leave Management</div>
-          <div style={{ fontSize: 12, color: T.muted }}>{canApproveLeave ? "All employee requests" : "Your leave overview"}</div>
-        </div>
-        {!canApproveLeave && (
-          <Btn onClick={openApply}><Plus size={14} />Apply for Leave</Btn>
-        )}
-      </div>
+      <PageHeader
+        title="Leave"
+        description={canApproveLeave ? "Requests from your employees" : "Your leave overview"}
+        actions={!canApproveLeave ? applyButton : null}
+      />
 
       {decisionError && <div style={{ marginBottom: 16 }}><FormFeedback>{decisionError}</FormFeedback></div>}
 
       {/* Employee: leave usage cards (D40: there are no entitlements, so only days taken) */}
       {!canApproveLeave && (
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+        <div className="stat-grid stat-grid--compact">
           {usageCards(myBal).map(({ type, days, year }) => (
-            <div key={type} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, flex: "1 1 140px", minWidth: 140 }}>
-              <div style={{ fontSize: 11, color: T.muted, fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>{type} Leave</div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: T.text }}>{days}</div>
-              <div style={{ fontSize: 11, color: T.muted }}>days taken in {year}</div>
-            </div>
+            <Stat key={type} label={`${type} leave`} value={days} sub={`days taken in ${year}`} icon={CalendarDays} color={T.primaryText} />
           ))}
         </div>
       )}
 
-      {/* Table */}
-      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table className="data-table">
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                {[canApproveLeave && "Employee", "Type", "Period", "Days", "Reason", "Applied", "Status", canApproveLeave && "Action"]
-                  .filter(Boolean)
-                  .map(h => (
-                    <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: 0.8, whiteSpace: "nowrap" }}>{h}</th>
-                  ))}
+      <DataTable
+        label="Leave requests"
+        empty={visible.length === 0 ? (
+          canApproveLeave ? (
+            <EmptyState icon={CalendarDays} title="No leave requests" description="When someone on your team asks for leave, the request will be listed here for you to approve or reject." />
+          ) : (
+            <EmptyState icon={CalendarDays} title="You haven't asked for leave yet" description="Requests you send are listed here with their status, and your manager is asked to decide.">
+              {applyButton}
+            </EmptyState>
+          )
+        ) : null}
+      >
+        <thead>
+          <tr>
+            {canApproveLeave && <th>Employee</th>}
+            <th>Type</th>
+            <th>Period</th>
+            <th className="cell-number">Days</th>
+            <th>Reason</th>
+            <th>Applied</th>
+            <th>Status</th>
+            <th>{canApproveLeave ? "Decision" : <span className="sr-only">Actions</span>}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map(l => {
+            const emp = employees.find(e => e.id === l.empId);
+            const mine = String(l.empId) === String(user.id);
+            return (
+              <tr key={l.id}>
+                {canApproveLeave && <td data-primary><PersonCell emp={emp} /></td>}
+                <td data-label="Type" {...(!canApproveLeave && { "data-primary": true })} style={{ fontWeight: 500 }}>{l.type}</td>
+                <td data-label="Period" style={{ whiteSpace: "nowrap" }}>{fdate(l.start)} → {fdate(l.end)}</td>
+                <td data-label="Days" className="cell-number">{l.days}</td>
+                <td data-label="Reason" className="cell-truncate" title={l.reason} style={{ color: T.mutedLight }}>{l.reason}</td>
+                <td data-label="Applied" style={{ whiteSpace: "nowrap", color: T.mutedLight }}>{fdate(l.applied)}</td>
+                <td data-label="Status"><Badge s={l.status} /></td>
+                {canApproveLeave ? (
+                  <td className="cell-actions">
+                    {l.status === "pending" ? (
+                      <div className="row-actions">
+                        <IconButton icon={Check} label={`Approve leave for ${emp?.name || "employee"}`} onClick={() => decide(l.id, "approved")} disabled={deciding} />
+                        <IconButton icon={X} variant="danger" label={`Reject leave for ${emp?.name || "employee"}`} onClick={() => decide(l.id, "rejected")} disabled={deciding} />
+                      </div>
+                    ) : null}
+                  </td>
+                ) : (
+                  <td className="cell-actions">
+                    {mine && l.status === "pending" && (
+                      <IconButton icon={Ban} variant="danger" label={`Cancel your ${l.type} leave request`} onClick={() => setCancelling(l)} disabled={deciding} />
+                    )}
+                  </td>
+                )}
               </tr>
-            </thead>
-            <tbody>
-              {visible.map(l => {
-                const emp = employees.find(e => e.id === l.empId);
-                return (
-                  <tr key={l.id}
-                    style={{ borderBottom: `1px solid ${T.border}`, transition: "background .15s" }}
-                    onMouseEnter={e => (e.currentTarget.style.background = T.cardHover)}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                    {canApproveLeave && (
-                      <td style={{ padding: "12px 16px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          {emp && <Avatar emp={emp} size={28} />}
-                          <span style={{ fontSize: 13, color: T.text, fontWeight: 600 }}>{emp?.name}</span>
-                        </div>
-                      </td>
-                    )}
-                    <td style={{ padding: "12px 16px" }}>
-                      <span style={{ background: `${T.primary}15`, color: T.primary, padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{l.type}</span>
-                    </td>
-                    <td style={{ padding: "12px 16px", fontSize: 12, color: T.mutedLight, whiteSpace: "nowrap" }}>{fdate(l.start)} → {fdate(l.end)}</td>
-                    <td style={{ padding: "12px 16px", fontSize: 13, fontWeight: 700, color: T.text }}>{l.days}d</td>
-                    <td style={{ padding: "12px 16px", fontSize: 12, color: T.muted, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.reason}</td>
-                    <td style={{ padding: "12px 16px", fontSize: 11, color: T.muted, whiteSpace: "nowrap" }}>{fdate(l.applied)}</td>
-                    <td style={{ padding: "12px 16px" }}><Badge s={l.status} /></td>
-                    {canApproveLeave && (
-                      <td style={{ padding: "12px 16px" }}>
-                        {l.status === "pending" ? (
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button onClick={() => decide(l.id, "approved")} disabled={deciding} style={{ background: T.successGlow, border: "none", color: T.success, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><Check size={13} /></button>
-                            <button onClick={() => decide(l.id, "rejected")} disabled={deciding} style={{ background: T.dangerGlow,  border: "none", color: T.danger,  padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}><X    size={13} /></button>
-                          </div>
-                        ) : <span style={{ fontSize: 11, color: T.muted }}>Done</span>}
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {visible.length === 0 && (
-          <div style={{ padding: 32, textAlign: "center", color: T.muted, fontSize: 13 }}>No leave requests found.</div>
-        )}
-      </div>
+            );
+          })}
+        </tbody>
+      </DataTable>
+
+      {cancelling && (
+        <ConfirmDialog
+          title="Cancel this request?"
+          message={`Your ${cancelling.type} leave request for ${fdate(cancelling.start)} to ${fdate(cancelling.end)} will be withdrawn. You can apply again at any time.`}
+          confirmLabel="Cancel request"
+          cancelLabel="Keep request"
+          onConfirm={cancelRequest}
+          onClose={() => setCancelling(null)}
+        />
+      )}
 
       {/* Apply Leave Modal */}
       {modal && (
-        <Modal title="Apply for Leave" onClose={() => setModal(false)}>
-          <Select label="Leave Type" value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))}>
+        <Modal title="Apply for leave" onClose={() => setModal(false)}>
+          <Select label="Leave type" value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))}>
             <option>Annual</option>
             <option>Sick</option>
             <option>Casual</option>
             <option>Maternity</option>
             <option>Emergency</option>
           </Select>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
-            <Input label="Start Date" type="date" value={form.start || ""} onChange={e => setForm(p => ({ ...p, start: e.target.value }))} />
-            <Input label="End Date"   type="date" value={form.end   || ""} onChange={e => setForm(p => ({ ...p, end:   e.target.value }))} />
+          <div className="form-grid">
+            <Input label="Start date" type="date" value={form.start || ""} onChange={e => setForm(p => ({ ...p, start: e.target.value }))} />
+            <Input label="End date"   type="date" value={form.end   || ""} onChange={e => setForm(p => ({ ...p, end:   e.target.value }))} />
           </div>
-          <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", fontSize: 12, color: T.muted, marginBottom: 6, fontWeight: 600 }}>Reason</label>
-            <textarea
-              value={form.reason || ""}
-              onChange={e => setForm(p => ({ ...p, reason: e.target.value }))}
-              rows={3}
-              style={{ width: "100%", background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: "9px 12px", color: T.text, fontSize: 13, outline: "none", resize: "vertical", fontFamily: "inherit" }}
-            />
-          </div>
+          <Textarea
+            label="Reason"
+            value={form.reason || ""}
+            onChange={e => setForm(p => ({ ...p, reason: e.target.value }))}
+            rows={3}
+          />
           <FormFeedback>{applyError}</FormFeedback>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <div className="modal-actions">
             <Btn variant="ghost" onClick={() => setModal(false)}>Cancel</Btn>
             <Btn onClick={applyLeave} disabled={!form.start || !form.end || !form.reason || applying}>
-              <Check size={13} />Submit Request
+              <Check size={16} aria-hidden="true" />{applying ? "Sending…" : "Submit request"}
             </Btn>
           </div>
         </Modal>

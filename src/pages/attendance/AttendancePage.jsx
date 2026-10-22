@@ -13,16 +13,14 @@ import {
 } from "lucide-react";
 
 import {
-  ActionGroup,
   Badge,
   Btn,
-  Card,
   ConfirmDialog,
   DataTable,
   EmptyState,
   FilterBar,
-  FormActions,
   FormFeedback,
+  IconButton,
   Input,
   Modal,
   PageHeader,
@@ -40,12 +38,13 @@ import {
   scopeEmployees,
 } from "../../utils/permissions";
 import { T } from "../../theme/theme";
+import { useToast } from "../../components/toast/toastContext";
 
 const ATTENDANCE_STATUSES = [
   { value: "present", label: "Present" },
   { value: "absent", label: "Absent" },
   { value: "late", label: "Late" },
-  { value: "leave", label: "On Leave" },
+  { value: "leave", label: "On leave" },
 ];
 
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
@@ -170,6 +169,7 @@ const AttendancePageContent = ({
   deleteAttendance,
 }) => {
   const today = toLocalDateValue(new Date());
+  const toast = useToast();
   const [selectedDate, setSelectedDate] = useState(today);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -237,22 +237,6 @@ const AttendancePageContent = ({
   const showActionsColumn = filteredRecords.some((record) =>
     canManageAttendanceRecord(user, record, employees),
   );
-
-  const headerCellStyle = {
-    padding: "12px 16px",
-    color: T.muted,
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: 0.8,
-    textAlign: "left",
-    textTransform: "uppercase",
-    whiteSpace: "nowrap",
-  };
-  const cellStyle = {
-    padding: "14px 16px",
-    color: T.mutedLight,
-    fontSize: 13,
-  };
 
   const clearFieldError = (field) => {
     setFormErrors((current) => {
@@ -365,6 +349,7 @@ const AttendancePageContent = ({
       await deleteAttendance(attendanceRecordId(latestRecord));
       setDeleteTarget(null);
       setDeleteError("");
+      toast.success("Attendance record deleted");
     } catch (error) {
       setDeleteError(error?.message || "Unable to delete attendance. Please try again.");
     } finally {
@@ -499,6 +484,7 @@ const AttendancePageContent = ({
       }
       setSelectedDate(date);
       setShowMarkModal(false);
+      toast.success(isEditing ? "Attendance updated" : "Attendance saved");
       setEditingRecordId(null);
       setAttendanceForm(getInitialAttendanceForm(date));
       setFormErrors({});
@@ -519,127 +505,121 @@ const AttendancePageContent = ({
         description={`${scopedAttendance.length} attendance record${scopedAttendance.length === 1 ? "" : "s"} in your scope`}
         actions={canMarkAttendance ? (
           <Btn onClick={openMarkModal}>
-            <Plus size={16} /> Mark Attendance
+            <Plus size={16} aria-hidden="true" />Mark attendance
           </Btn>
         ) : null}
       />
 
       <FilterBar style={{ alignItems: "flex-end" }}>
-        <div style={{ minWidth: 180 }}>
-          <Input
-            label="Attendance date"
-            type="date"
-            value={selectedDate}
-            onChange={(event) => setSelectedDate(event.target.value)}
-          />
-        </div>
-        <div style={{ minWidth: 180 }}>
-          <Select
-            label="Status"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-          >
-            <option value="all">All statuses</option>
-            <option value="present">Present</option>
-            <option value="absent">Absent</option>
-            <option value="late">Late</option>
-            <option value="leave">On Leave</option>
-          </Select>
-        </div>
+        <Input
+          className="filter-field"
+          label="Attendance date"
+          type="date"
+          value={selectedDate}
+          onChange={(event) => setSelectedDate(event.target.value)}
+        />
+        <Select
+          className="filter-field"
+          label="Status"
+          value={statusFilter}
+          onChange={(event) => setStatusFilter(event.target.value)}
+        >
+          <option value="all">All statuses</option>
+          <option value="present">Present</option>
+          <option value="absent">Absent</option>
+          <option value="late">Late</option>
+          <option value="leave">On leave</option>
+        </Select>
         <SearchBar
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search employee name"
+          placeholder="Search by employee name"
           ariaLabel="Search attendance by employee name"
         />
       </FilterBar>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 20 }}>
+      <div className="stat-grid stat-grid--compact">
         <Stat icon={UserCheck} label="Present" value={statusCounts.present} sub="Selected date" color={T.success} />
         <Stat icon={UserX} label="Absent" value={statusCounts.absent} sub="Selected date" color={T.danger} />
         <Stat icon={Clock3} label="Late" value={statusCounts.late} sub="Selected date" color={T.warning} />
-        <Stat icon={CalendarDays} label="On Leave" value={statusCounts.leave} sub="Selected date" color={T.secondary} />
-        <Stat icon={CircleDashed} label="Unmarked" value={unmarkedEmployees.length} sub={`${activeEmployees.length} active scoped employees`} color={T.mutedLight} />
+        <Stat icon={CalendarDays} label="On leave" value={statusCounts.leave} sub="Selected date" color={T.secondary} />
+        <Stat icon={CircleDashed} label="Unmarked" value={unmarkedEmployees.length} sub={`${activeEmployees.length} active in scope`} color={T.mutedLight} />
       </div>
 
-      <Card title="Attendance Records" right={<span style={{ color: T.muted, fontSize: 12 }}>{selectedDate}</span>}>
-        {filteredRecords.length === 0 ? (
+      <div className="section-head">
+        <h2>Attendance records</h2>
+        <span>{selectedDate}</span>
+      </div>
+
+      <DataTable
+        label="Attendance records"
+        empty={filteredRecords.length === 0 ? (
           <EmptyState
             icon={CalendarCheck2}
-            title="No attendance records found"
+            title="No attendance records"
             description={selectedDateRecords.length === 0
-              ? "No real attendance records exist for the selected date in your scope."
-              : "No records match the selected status and employee search."}
-          />
-        ) : (
-          <DataTable>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                {[
-                  "Employee",
-                  "Department",
-                  "Date",
-                  "Status",
-                  "Check In",
-                  "Check Out",
-                  "Notes",
-                  ...(showActionsColumn ? ["Actions"] : []),
-                ].map((heading) => (
-                  <th key={heading} style={headerCellStyle}>{heading}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRecords.map((record, index) => {
-                const employee = employeeById.get(String(record.empId));
-                const date = attendanceDate(record);
-                const canEditRecord = canManageAttendanceRecord(user, record, employees);
-                return (
-                  <tr
-                    key={`${record.id ?? record._docId ?? "attendance"}-${index}`}
-                    style={{ borderBottom: `1px solid ${T.border}` }}
-                  >
-                    <td style={{ ...cellStyle, color: T.text, fontWeight: 700 }}>
-                      {employee?.name || "Unknown employee"}
-                    </td>
-                    <td style={cellStyle}>{employee?.dept || "Unassigned"}</td>
-                    <td style={{ ...cellStyle, whiteSpace: "nowrap" }}>
-                      {date ? fdate(`${date}T00:00:00`) : "—"}
-                    </td>
-                    <td style={cellStyle}><Badge s={statusLabel(record.status)} /></td>
-                    <td style={{ ...cellStyle, whiteSpace: "nowrap" }}>{displayTime(record.checkIn)}</td>
-                    <td style={{ ...cellStyle, whiteSpace: "nowrap" }}>{displayTime(record.checkOut)}</td>
-                    <td style={{ ...cellStyle, minWidth: 180 }}>
-                      {["string", "number"].includes(typeof record.notes) && String(record.notes).trim()
-                        ? String(record.notes)
-                        : "—"}
-                    </td>
-                    {showActionsColumn && (
-                      <td style={cellStyle}>
-                        {canEditRecord && (
-                          <ActionGroup>
-                            <Btn variant="outline" sm onClick={() => openEditModal(record)}>
-                              <Pencil size={13} /> Edit
-                            </Btn>
-                            <Btn variant="danger" sm onClick={() => openDeleteDialog(record)}>
-                              <Trash2 size={13} /> Delete
-                            </Btn>
-                          </ActionGroup>
-                        )}
-                      </td>
+              ? "Nothing has been recorded for this date in your scope."
+              : "No records match the selected status and search."}
+          >
+            {selectedDateRecords.length === 0 && canMarkAttendance && (
+              <Btn onClick={openMarkModal}><Plus size={16} aria-hidden="true" />Mark attendance</Btn>
+            )}
+          </EmptyState>
+        ) : null}
+      >
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Department</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th>Check in</th>
+            <th>Check out</th>
+            <th>Notes</th>
+            {showActionsColumn && <th><span className="sr-only">Actions</span></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {filteredRecords.map((record, index) => {
+            const employee = employeeById.get(String(record.empId));
+            const date = attendanceDate(record);
+            const canEditRecord = canManageAttendanceRecord(user, record, employees);
+            const employeeName = employee?.name || "Unknown employee";
+            return (
+              <tr key={`${record.id ?? record._docId ?? "attendance"}-${index}`}>
+                <td data-primary style={{ fontWeight: 500 }}>{employeeName}</td>
+                <td data-label="Department" style={{ color: T.mutedLight }}>{employee?.dept || "Unassigned"}</td>
+                <td data-label="Date" style={{ whiteSpace: "nowrap", color: T.mutedLight }}>
+                  {date ? fdate(`${date}T00:00:00`) : "—"}
+                </td>
+                <td data-label="Status"><Badge s={statusLabel(record.status)} /></td>
+                <td data-label="Check in" className="cell-number">{displayTime(record.checkIn)}</td>
+                <td data-label="Check out" className="cell-number">{displayTime(record.checkOut)}</td>
+                <td data-label="Notes" className="cell-truncate" style={{ color: T.mutedLight }}>
+                  {["string", "number"].includes(typeof record.notes) && String(record.notes).trim()
+                    ? String(record.notes)
+                    : "—"}
+                </td>
+                {showActionsColumn && (
+                  <td className="cell-actions">
+                    {canEditRecord && (
+                      <div className="row-actions">
+                        <IconButton icon={Pencil} label={`Edit attendance for ${employeeName}`} onClick={() => openEditModal(record)} />
+                        <IconButton icon={Trash2} variant="danger" label={`Delete attendance for ${employeeName}`} onClick={() => openDeleteDialog(record)} />
+                      </div>
                     )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </DataTable>
-        )}
-      </Card>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </DataTable>
 
       {showMarkModal && (
-        <Modal title={isEditing ? "Edit Attendance" : "Create Attendance"} onClose={closeMarkModal}>
+        <Modal title={isEditing ? "Edit attendance" : "Mark attendance"} onClose={closeMarkModal}>
           <form onSubmit={handleSaveAttendance}>
-            <div style={{ display: "grid", gap: 16 }}>
+            <div>
               <Select
                 label="Employee"
                 value={attendanceForm.empId}
@@ -650,7 +630,7 @@ const AttendancePageContent = ({
                   ? "No active employees are available in your attendance scope."
                   : undefined}
               >
-                <option value="">Select employee</option>
+                <option value="">Select an employee</option>
                 {manageableEmployees.map((employee) => (
                   <option key={String(employee.id)} value={String(employee.id)}>
                     {employee.name || employee.email || `Employee ${employee.id}`}
@@ -658,7 +638,7 @@ const AttendancePageContent = ({
                 ))}
               </Select>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
+              <div className="form-grid">
                 <Input
                   label="Date"
                   type="date"
@@ -679,9 +659,9 @@ const AttendancePageContent = ({
                 </Select>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
+              <div className="form-grid">
                 <Input
-                  label="Check In"
+                  label="Check in"
                   type="time"
                   value={attendanceForm.checkIn}
                   onChange={(event) => updateFormField("checkIn", event.target.value)}
@@ -689,7 +669,7 @@ const AttendancePageContent = ({
                   disabled={attendanceForm.status === "absent" || attendanceForm.status === "leave"}
                 />
                 <Input
-                  label="Check Out"
+                  label="Check out"
                   type="time"
                   value={attendanceForm.checkOut}
                   onChange={(event) => updateFormField("checkOut", event.target.value)}
@@ -702,21 +682,21 @@ const AttendancePageContent = ({
                 label="Notes"
                 value={attendanceForm.notes}
                 onChange={(event) => updateFormField("notes", event.target.value)}
-                placeholder="Add an optional attendance note"
+                placeholder="An optional note"
               />
 
               <FormFeedback>{submitError}</FormFeedback>
 
-              <FormActions>
+              <div className="modal-actions">
                 <Btn type="button" variant="ghost" onClick={closeMarkModal} disabled={isSaving}>
                   Cancel
                 </Btn>
                 <Btn type="submit" disabled={isSaving || manageableEmployees.length === 0}>
-                  <Check size={16} /> {isSaving
-                    ? (isEditing ? "Updating..." : "Creating...")
-                    : (isEditing ? "Save Changes" : "Create Attendance")}
+                  <Check size={16} aria-hidden="true" />{isSaving
+                    ? (isEditing ? "Updating…" : "Saving…")
+                    : (isEditing ? "Save changes" : "Save attendance")}
                 </Btn>
-              </FormActions>
+              </div>
             </div>
           </form>
         </Modal>
@@ -724,7 +704,7 @@ const AttendancePageContent = ({
 
       {deleteTarget && (
         <ConfirmDialog
-          title="Delete Attendance"
+          title="Delete attendance record"
           message={(
             <div>
               <div>
@@ -738,7 +718,7 @@ const AttendancePageContent = ({
               <FormFeedback>{deleteError}</FormFeedback>
             </div>
           )}
-          confirmLabel={isDeleting ? "Deleting..." : "Delete Attendance"}
+          confirmLabel={isDeleting ? "Deleting…" : "Delete record"}
           onConfirm={confirmDeleteAttendance}
           onClose={closeDeleteDialog}
         />

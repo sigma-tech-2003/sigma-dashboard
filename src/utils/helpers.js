@@ -1,4 +1,4 @@
-import { T } from "../theme/theme";
+import { T } from "../theme/theme.js";
 
 export const fmt = (number) => `PKR ${Number(number || 0).toLocaleString()}`;
 
@@ -14,19 +14,26 @@ export const fdate = (date) =>
       })
     : "—";
 
+// Avatar fills. Each is dark enough for white initials at 4.5:1 or better (checked in helpers.test.js), so one palette
+// serves both themes.
 export const AVATAR_PALETTE = [
-  "#1d6fec",
-  "#8b5cf6",
-  "#f04060",
-  "#00cc88",
-  "#f0a500",
-  "#00c2cb",
-  "#e55d87",
-  "#5fc3e4",
+  "#3e6fe6",
+  "#7c4dd6",
+  "#c93a54",
+  "#0f7a52",
+  "#b54708",
+  "#077784",
+  "#b8336a",
+  "#4a5fa8",
 ];
 
-export const aColor = (id) =>
-  AVATAR_PALETTE[(id - 1) % AVATAR_PALETTE.length];
+// Ids are UUID strings, so the colour comes from a hash of the id: the same person always gets the same colour.
+export const aColor = (id) => {
+  const text = String(id ?? "");
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+};
 
 export const initials = (name) =>
   name?.split(" ").map((part) => part[0]).join("").toUpperCase().slice(0, 2) || "??";

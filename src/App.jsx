@@ -2,6 +2,9 @@ import { lazy, Suspense, useEffect, useMemo } from "react";
 import { AppProvider, useApp } from "./app/index.js";
 import Layout from "./components/layout/Layout";
 import LoadingScreen from "./components/loading-screen/LoadingScreen";
+import PageMotion from "./components/page-motion/PageMotion";
+import PageSkeleton from "./components/page-skeleton/PageSkeleton";
+import ToastProvider from "./components/toast/ToastProvider";
 import {
   APP_ROUTES,
   canAccessRoute,
@@ -94,6 +97,7 @@ function AuthenticatedWorkspace({
     loadError: leavesLoadError,
     addLeave,
     updateLeaveStatus,
+    cancelLeave,
   } = useLeaves(collectionAccess, employees, employeesLoading);
   const {
     payroll,
@@ -179,7 +183,7 @@ function AuthenticatedWorkspace({
     }
   }, [activeRoute, navigate, routeId]);
 
-  if (loading || !activeRoute) return <LoadingScreen message="Loading data…" />;
+  if (!activeRoute) return <LoadingScreen message="Loading…" />;
 
   const onLogout = async () => {
     await logout();
@@ -209,6 +213,7 @@ function AuthenticatedWorkspace({
     deleteAttendance,
     addLeave,
     updateLeaveStatus,
+    cancelLeave,
     addPayroll,
     updatePayrollStatus,
     addDepartment,
@@ -218,16 +223,24 @@ function AuthenticatedWorkspace({
   };
 
   return (
-    <Layout
-      user={user}
-      page={activeRoute.id}
-      setPage={navigate}
-      onLogout={onLogout}
-    >
-      <Suspense fallback={<LoadingScreen message="Loading page…" />}>
-        <Page {...sharedProps} />
-      </Suspense>
-    </Layout>
+    <ToastProvider>
+      <Layout
+        user={user}
+        page={activeRoute.id}
+        setPage={navigate}
+        onLogout={onLogout}
+      >
+        {loading ? (
+          <PageSkeleton label="Loading data" />
+        ) : (
+          <Suspense fallback={<PageSkeleton label="Loading page" />}>
+            <PageMotion key={activeRoute.id}>
+              <Page {...sharedProps} />
+            </PageMotion>
+          </Suspense>
+        )}
+      </Layout>
+    </ToastProvider>
   );
 }
 

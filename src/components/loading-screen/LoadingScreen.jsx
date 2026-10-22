@@ -10,10 +10,10 @@ const LoadingScreen = ({ message = "Loading…" }) => (
     <div
       className="loading-icon"
       style={{
-        background: `linear-gradient(135deg,${T.primary},${T.purple})`,
+        background: T.primary,
       }}
     >
-      <Briefcase size={22} color={T.white} />
+      <Briefcase size={22} color={T.white} aria-hidden="true" />
     </div>
 
     <div

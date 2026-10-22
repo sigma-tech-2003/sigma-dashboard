@@ -1,57 +1,96 @@
+/*
+  The single source of design tokens. Dark is the default; light overrides under [data-theme="light"].
+  theme.js exposes the same names to JavaScript as var(...) strings, so there is no second copy of any colour.
+
+  Contrast is checked by src/theme/tokens.test.js: every text pair is at least 4.5:1 and every form-control border
+  at least 3:1, in both themes. Change a colour here and that test tells you if it broke.
+
+  Existing names are kept (muted, muted-light, card, border...) so components written against them keep working:
+    --color-muted        tertiary text (helper text, placeholders)
+    --color-muted-light  secondary text (labels, table cells)
+*/
 :root {
-  --font-family: "Outfit", sans-serif;
+  color-scheme: dark;
 
-  --color-bg: #05080f;
-  --color-surface: #0a1020;
-  --color-card: #0e1628;
-  --color-card-hover: #111d32;
-  --color-border: #1a2740;
-  --color-border-light: #1e3050;
-  --color-primary: #1d6fec;
-  --color-primary-glow: #1d6fec30;
-  --color-primary-tint: #1d6fec20;
-  --color-secondary: #00c2cb;
-  --color-secondary-glow: #00c2cb20;
-  --color-success: #00cc88;
-  --color-success-glow: #00cc8820;
-  --color-warning: #f0a500;
-  --color-warning-glow: #f0a50020;
-  --color-warning-tint: #f0a50015;
-  --color-danger: #f04060;
-  --color-danger-glow: #f0406020;
-  --color-purple: #8b5cf6;
-  --color-purple-glow: #8b5cf620;
-  --color-text: #dde8ff;
-  --color-muted: #5a7499;
-  --color-muted-glow: #5a749920;
-  --color-muted-light: #7a94b8;
-  --color-sidebar: #070c18;
-  --color-sidebar-border: #0f1e35;
-  --color-white: #fff;
-  --color-black: #000;
-  --color-overlay: #000000aa;
+  --font-family: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
-  --font-size-xs: 11px;
-  --font-size-sm: 12px;
-  --font-size-md: 13px;
-  --font-size-lg: 14px;
-  --font-size-xl: 15px;
+  /* Surfaces */
+  --color-bg: #0b0e14;
+  --color-surface: #11151d;
+  --color-card: #11151d;
+  --color-card-hover: #151a24;
+  --color-raised: #171c26;
+  --color-sidebar: #0d1118;
+  --color-sidebar-border: #222a38;
+
+  /* Lines */
+  --color-border: #222a38;
+  --color-border-light: #2a3342;
+  --color-border-control: #5f6d85;
+
+  /* Text */
+  --color-text: #e8ecf3;
+  --color-muted-light: #a3adbf;
+  --color-muted: #8691a5;
+
+  /* Accent: fill is for buttons (white text on it), text is for links and icons on dark surfaces */
+  --color-primary: #3e6fe6;
+  --color-primary-hover: #3563d2;
+  --color-primary-text: #6b93f5;
+
+  /* Semantic: the plain colour is for text and dots; -fill is for solid buttons, with its own on- colour */
+  --color-success: #3ecf9a;
+  --color-success-fill: #0f7a52;
+  --color-on-success: #ffffff;
+  --color-warning: #f2b443;
+  --color-warning-fill: #f2b443;
+  --color-on-warning: #1a1204;
+  --color-danger: #f47a7a;
+  --color-danger-fill: #c93a54;
+  --color-on-danger: #ffffff;
+  --color-secondary: #2fc4cf;
+  --color-purple: #a78bfa;
+
+  /* Tints derive from the colour they tint, so they follow the theme with no second palette */
+  --color-primary-glow: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  --color-primary-tint: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  --color-secondary-glow: color-mix(in srgb, var(--color-secondary) 14%, transparent);
+  --color-success-glow: color-mix(in srgb, var(--color-success) 14%, transparent);
+  --color-warning-glow: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  --color-warning-tint: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  --color-danger-glow: color-mix(in srgb, var(--color-danger) 14%, transparent);
+  --color-purple-glow: color-mix(in srgb, var(--color-purple) 14%, transparent);
+  --color-muted-glow: color-mix(in srgb, var(--color-muted) 16%, transparent);
+
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-overlay: #000000a6;
+
+  /* Type: 12 is the floor, 14 is body */
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 16px;
   --font-size-2xl: 16px;
   --font-size-3xl: 20px;
-  --font-size-4xl: 26px;
+  --font-size-4xl: 28px;
   --font-size-5xl: 28px;
+  --line-height-tight: 1.2;
+  --line-height-body: 1.5;
 
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
-  --font-weight-bold: 700;
-  --font-weight-extrabold: 800;
+  --font-weight-bold: 600;
+  --font-weight-extrabold: 600;
 
+  /* Spacing: a 4px grid. The old in-between steps (6, 10, 14) snap to it */
   --space-1: 4px;
-  --space-2: 6px;
+  --space-2: 8px;
   --space-3: 8px;
-  --space-4: 10px;
+  --space-4: 12px;
   --space-5: 12px;
-  --space-6: 14px;
+  --space-6: 16px;
   --space-7: 16px;
   --space-8: 20px;
   --space-9: 24px;
@@ -60,17 +99,28 @@
 
   --radius-sm: 6px;
   --radius-md: 8px;
-  --radius-lg: 10px;
+  --radius-lg: 8px;
   --radius-xl: 12px;
-  --radius-2xl: 14px;
+  --radius-2xl: 12px;
   --radius-3xl: 16px;
   --radius-pill: 999px;
 
   --shadow-card: 0 0 0 1px var(--color-border);
+  --shadow-raised: 0 12px 32px rgb(0 0 0 / 0.5);
   --transition-fast: 0.15s ease;
   --transition-base: 0.2s ease;
   --transition-progress: 0.4s ease;
+  --dur-fast: 0.15s;
+  --dur-base: 0.25s;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --z-index-modal: 1000;
+
+  /* Layout */
+  --page-pad: 32px;
+  --card-pad: 20px;
+  --control-h: 36px;
+  --row-h: 52px;
+  --font-size-cell: 14px;
 
   --breakpoint-sm: 640px;
   --breakpoint-md: 768px;
@@ -79,33 +129,77 @@
 }
 
 :root[data-theme="light"] {
-  --color-bg: #f4f7fb;
+  color-scheme: light;
+
+  --color-bg: #f6f7f9;
   --color-surface: #ffffff;
   --color-card: #ffffff;
-  --color-card-hover: #f7f9fc;
-  --color-border: #dbe3ee;
-  --color-border-light: #cbd7e6;
-  --color-primary: #175cd3;
-  --color-primary-glow: #175cd324;
-  --color-primary-tint: #e8f0fe;
-  --color-secondary: #087f8c;
-  --color-secondary-glow: #087f8c1a;
-  --color-success: #087a55;
-  --color-success-glow: #087a5518;
-  --color-warning: #b54708;
-  --color-warning-glow: #b5470818;
-  --color-warning-tint: #fff4e5;
-  --color-danger: #c4324f;
-  --color-danger-glow: #c4324f18;
-  --color-purple: #6941c6;
-  --color-purple-glow: #6941c618;
-  --color-text: #172033;
-  --color-muted: #66758a;
-  --color-muted-glow: #66758a18;
-  --color-muted-light: #52657d;
+  --color-card-hover: #f7f8fa;
+  --color-raised: #ffffff;
   --color-sidebar: #ffffff;
-  --color-sidebar-border: #dbe3ee;
-  --color-white: #fff;
-  --color-black: #000;
+  --color-sidebar-border: #e4e7ec;
+
+  --color-border: #e4e7ec;
+  --color-border-light: #d0d5dd;
+  --color-border-control: #7d889b;
+
+  --color-text: #101828;
+  --color-muted-light: #475467;
+  --color-muted: #667085;
+
+  --color-primary: #2a5bd7;
+  --color-primary-hover: #234fc0;
+  --color-primary-text: #2a5bd7;
+
+  --color-success: #067647;
+  --color-success-fill: #067647;
+  --color-on-success: #ffffff;
+  --color-warning: #b54708;
+  --color-warning-fill: #b54708;
+  --color-on-warning: #ffffff;
+  --color-danger: #b42318;
+  --color-danger-fill: #b42318;
+  --color-on-danger: #ffffff;
+  --color-secondary: #077784;
+  --color-purple: #6941c6;
+
+  --color-primary-glow: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  --color-primary-tint: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  --color-secondary-glow: color-mix(in srgb, var(--color-secondary) 10%, transparent);
+  --color-success-glow: color-mix(in srgb, var(--color-success) 10%, transparent);
+  --color-warning-glow: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  --color-warning-tint: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  --color-danger-glow: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  --color-purple-glow: color-mix(in srgb, var(--color-purple) 10%, transparent);
+  --color-muted-glow: color-mix(in srgb, var(--color-muted) 14%, transparent);
+
   --color-overlay: #0f172a66;
+  --shadow-raised: 0 12px 32px rgb(16 24 40 / 0.14);
+}
+
+/* Compact density: only row height and the table cell font change. Set data-density on <html> (see DensityToggle). */
+:root[data-density="compact"] {
+  --row-h: 40px;
+  --font-size-cell: 13px;
+}
+
+@media (max-width: 1023px) {
+  :root {
+    --page-pad: 24px;
+  }
+}
+
+/* Phones and touch: 44px targets whatever the density */
+@media (max-width: 767px), (pointer: coarse) {
+  :root {
+    --control-h: 44px;
+    --row-h: 56px;
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --page-pad: 16px;
+    --card-pad: 16px;
+  }
 }

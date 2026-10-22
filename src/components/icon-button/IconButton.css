@@ -1,0 +1,33 @@
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-muted-light);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--color-card-hover);
+  color: var(--color-text);
+}
+
+.icon-button--danger:hover:not(:disabled) {
+  background: var(--color-danger-glow);
+  color: var(--color-danger);
+}
+
+.icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-button:active:not(:disabled) {
+  transform: scale(0.92);
+}

@@ -1,34 +1,29 @@
 import "./Stat.css";
-import { T } from "../../theme/theme";
+import { useRef } from "react";
+import { alpha } from "../../theme/theme";
+import { useCountUp } from "../../hooks/motion/useCountUp";
 
-const Stat = ({ icon: Icon, label, value, sub, color }) => (
-  <div
-    className="stat"
-    style={{
-      boxShadow: `0 0 0 1px ${T.border}`,
-    }}
-    onMouseEnter={(e) =>
-      (e.currentTarget.style.borderColor = color)
-    }
-    onMouseLeave={(e) =>
-      (e.currentTarget.style.borderColor = T.border)
-    }
-  >
-    <div className="stat-header">
-      <span className="stat-label">{label}</span>
+const Stat = ({ icon: Icon, label, value, sub, color }) => {
+  const valueRef = useRef(null);
+  useCountUp(valueRef, value);
 
-      <div
-        className="stat-icon"
-        style={{ background: `${color}18` }}
-      >
-        <Icon size={16} color={color} />
+  return (
+    <div className="stat">
+      <div className="stat-header">
+        <span className="stat-label">{label}</span>
+
+        {Icon && (
+          <div className="stat-icon" style={{ background: alpha(color, 12) }}>
+            <Icon size={16} color={color} aria-hidden="true" />
+          </div>
+        )}
       </div>
+
+      <div ref={valueRef} className="stat-value">{value}</div>
+
+      {sub && <div className="stat-sub">{sub}</div>}
     </div>
-
-    <div className="stat-value">{value}</div>
-
-    {sub && <div className="stat-sub">{sub}</div>}
-  </div>
-);
+  );
+};
 
 export default Stat;

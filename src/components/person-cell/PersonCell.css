@@ -1,0 +1,23 @@
+.person-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.person-cell__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  text-align: left;
+}
+
+.person-cell__name {
+  color: var(--color-text);
+  font-weight: var(--font-weight-medium);
+}
+
+.person-cell__sub {
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+}

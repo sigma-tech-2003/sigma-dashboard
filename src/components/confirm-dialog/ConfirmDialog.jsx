@@ -11,8 +11,8 @@ const ConfirmDialog = ({
   onClose,
 }) => (
   <Modal title={title} onClose={onClose}>
-    {message && <div style={{ color: "var(--color-muted)", fontSize: "var(--font-size-md)" }}>{message}</div>}
-    <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-3)", marginTop: "var(--space-9)" }}>
+    {message && <div style={{ color: "var(--color-muted-light)", fontSize: "var(--font-size-md)" }}>{message}</div>}
+    <div className="modal-actions">
       <Btn variant="ghost" onClick={onClose}>{cancelLabel}</Btn>
       <Btn variant={variant} onClick={onConfirm}>{confirmLabel}</Btn>
     </div>

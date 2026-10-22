@@ -5,9 +5,10 @@
 
 import "../login-page/LoginPage.css";
 import { useRef, useState } from "react";
-import { T } from "../../theme/theme";
 import { Briefcase } from "lucide-react";
 import Input from "../../components/input/Input";
+import Btn from "../../components/btn/Btn";
+import FormFeedback from "../../components/form-feedback/FormFeedback";
 import { useApp } from "../../app/index.js";
 import { PasswordChangeError, changeOwnPassword } from "../../services/authService";
 
@@ -22,7 +23,8 @@ const ChangePasswordPage = () => {
   const [loading, setLoading] = useState(false);
   const inFlight = useRef(false);
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event) => {
+    event?.preventDefault();
     if (inFlight.current) return;
     if (next !== confirm) { setErr(MISMATCH_MESSAGE); return; }
 
@@ -42,44 +44,27 @@ const ChangePasswordPage = () => {
   };
 
   return (
-    <div className="login-page" style={{ background: T.bg }}>
+    <div className="login-page">
       <div className="login-wrapper">
 
         <div className="login-header">
-          <div
-            className="login-logo"
-            style={{
-              background: `linear-gradient(135deg,${T.primary},${T.purple})`,
-              boxShadow: `0 8px 32px ${T.primaryGlow}`,
-            }}
-          >
-            <Briefcase size={24} color={T.white} />
+          <div className="login-logo">
+            <Briefcase size={24} aria-hidden="true" />
           </div>
-
-          <div className="login-title" style={{ color: T.text }}>
-            SIGMA HRM <span style={{ color: T.primary }}>Portal</span>
-          </div>
-
-          <div className="login-subtitle" style={{ color: T.muted }}>
-            Human Resource Management System
-          </div>
+          <h1 className="login-title">Sigma HRM <span>Portal</span></h1>
+          <p className="login-subtitle">Human resource management</p>
         </div>
 
-        <div
-          className="login-card"
-          style={{ background: T.card, border: `1px solid ${T.border}` }}
-        >
-          <div className="login-heading" style={{ color: T.text }}>
-            Choose your own password
-          </div>
+        <form className="login-card" onSubmit={handleSubmit} noValidate>
+          <h2 className="login-heading">Choose your own password</h2>
 
-          <div style={{ color: T.muted, fontSize: 13, lineHeight: 1.5 }}>
+          <p className="login-lede">
             You signed in with a temporary password that someone else set for you. Choose a password only you
             know to continue.
-          </div>
+          </p>
 
           <Input
-            label="Temporary Password"
+            label="Temporary password"
             type="password"
             placeholder="••••••••"
             autoComplete="current-password"
@@ -88,7 +73,7 @@ const ChangePasswordPage = () => {
           />
 
           <Input
-            label="New Password"
+            label="New password"
             type="password"
             placeholder="••••••••"
             autoComplete="new-password"
@@ -98,7 +83,7 @@ const ChangePasswordPage = () => {
           />
 
           <Input
-            label="Confirm New Password"
+            label="Confirm new password"
             type="password"
             placeholder="••••••••"
             autoComplete="new-password"
@@ -106,52 +91,21 @@ const ChangePasswordPage = () => {
             onChange={e => setConfirm(e.target.value)}
           />
 
-          {err && (
-            <div
-              className="login-error"
-              role="alert"
-              style={{
-                background: T.dangerGlow,
-                border: `1px solid ${T.danger}30`,
-                color: T.danger,
-              }}
-            >
-              {err}
-            </div>
-          )}
+          <FormFeedback>{err}</FormFeedback>
+
+          <Btn type="submit" disabled={loading}>
+            {loading ? "Saving…" : "Change password"}
+          </Btn>
 
           <button
             type="button"
-            onClick={handleSubmit}
-            disabled={loading}
-            className="login-btn"
-            style={{
-              background: `linear-gradient(135deg,${T.primary},${T.purple})`,
-              color: T.white,
-              opacity: loading ? 0.7 : 1,
-            }}
-          >
-            {loading ? "Saving…" : "Change password →"}
-          </button>
-
-          <button
-            type="button"
+            className="login-link"
             onClick={() => logout()}
             disabled={loading}
-            style={{
-              background: "none",
-              border: "none",
-              color: T.muted,
-              cursor: "pointer",
-              fontSize: 13,
-              marginTop: 12,
-              padding: 0,
-              textDecoration: "underline",
-            }}
           >
             Sign out
           </button>
-        </div>
+        </form>
 
       </div>
     </div>

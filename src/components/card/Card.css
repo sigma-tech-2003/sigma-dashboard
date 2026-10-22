@@ -1,19 +1,22 @@
+/* Flat: a hairline and the card surface, no shadow. Elevation is reserved for things that float (menus, dialogs). */
 .card {
   background: var(--color-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
-  padding: var(--space-8);
+  padding: var(--card-pad);
 }
 
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
   margin-bottom: var(--space-6);
 }
 
 .card-title {
   color: var(--color-text);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
 }

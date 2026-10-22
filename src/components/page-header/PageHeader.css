@@ -1,26 +1,65 @@
 .page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-5);
+  gap: var(--space-4) var(--space-6);
   flex-wrap: wrap;
-  margin-bottom: var(--space-8);
+  margin-bottom: var(--space-9);
+}
+
+.page-header__content {
+  min-width: 0;
+  flex: 1 1 240px;
 }
 
 .page-header__title {
   color: var(--color-text);
   font-size: var(--font-size-3xl);
-  font-weight: var(--font-weight-extrabold);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  letter-spacing: -0.01em;
 }
 
 .page-header__description {
-  margin-top: var(--space-1);
-  color: var(--color-muted);
-  font-size: var(--font-size-sm);
+  margin-top: var(--space-2);
+  color: var(--color-muted-light);
+  font-size: var(--font-size-md);
 }
 
+/* Actions sit on the right beside the title, and drop below it (full width, wrapping) on a phone */
 .page-header__actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-3);
+}
+
+@media (max-width: 639px) {
+  .page-header__actions {
+    width: 100%;
+  }
+
+  .page-header__actions > * {
+    flex: 1 1 auto;
+  }
+}
+
+/* A heading above a table or list inside a page */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.section-head h2 {
+  color: var(--color-text);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.section-head span {
+  color: var(--color-muted-light);
+  font-size: var(--font-size-sm);
 }

@@ -4,7 +4,7 @@ const FormFeedback = ({ status = "error", children }) => {
   if (!children) return null;
 
   return (
-    <div className={"form-feedback form-feedback--" + status} role="status">
+    <div className={"form-feedback form-feedback--" + status} role={status === "error" ? "alert" : "status"}>
       {children}
     </div>
   );

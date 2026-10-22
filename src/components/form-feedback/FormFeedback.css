@@ -17,3 +17,9 @@
   background: var(--color-success-glow);
   color: var(--color-success);
 }
+
+.form-feedback--warning {
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  background: var(--color-warning-glow);
+  color: var(--color-warning);
+}

@@ -1,16 +1,12 @@
 import { useId } from "react";
-import "./Textarea.css";
-import "../form-field/FieldHelp.css";
-import { T } from "../../theme/theme";
+import "../form-field/Field.css";
 
 const Textarea = ({
   label,
   hint,
   error,
   id,
-  onFocus,
-  onBlur,
-  style,
+  className = "",
   ...props
 }) => {
   const generatedId = useId();
@@ -18,7 +14,7 @@ const Textarea = ({
   const descriptionId = error ? fieldId + "-error" : hint ? fieldId + "-hint" : undefined;
 
   return (
-    <div className="textarea-wrapper">
+    <div className={"textarea-wrapper " + className}>
       {label && <label className="textarea-label" htmlFor={fieldId}>{label}</label>}
       <textarea
         {...props}
@@ -26,20 +22,6 @@ const Textarea = ({
         className="textarea-field"
         aria-invalid={Boolean(error)}
         aria-describedby={descriptionId}
-        style={{
-          background: T.card,
-          border: "1px solid " + (error ? T.danger : T.border),
-          color: T.text,
-          ...style,
-        }}
-        onFocus={(event) => {
-          event.target.style.borderColor = error ? T.danger : T.primary;
-          onFocus?.(event);
-        }}
-        onBlur={(event) => {
-          event.target.style.borderColor = error ? T.danger : T.border;
-          onBlur?.(event);
-        }}
       />
       {error && <div id={fieldId + "-error"} className="field-error">{error}</div>}
       {!error && hint && <div id={fieldId + "-hint"} className="field-hint">{hint}</div>}

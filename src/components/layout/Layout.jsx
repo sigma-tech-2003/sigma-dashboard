@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { getNavigationRoutes, getRouteById } from "../../config/routes";
-import { T } from "../../theme/theme";
 import PageContainer from "./PageContainer";
 import "./Layout.css";
 import Sidebar from "./Sidebar";
@@ -19,7 +18,8 @@ const Layout = ({
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigation = getNavigationRoutes(user);
-  const pageTitle = getRouteById(page)?.title || "Dashboard";
+  const route = getRouteById(page);
+  const pageTitle = route?.title || "Dashboard";
 
   const handleMenuToggle = () => {
     if (window.matchMedia("(max-width: " + (MOBILE_BREAKPOINT - 1) + "px)").matches) {
@@ -36,10 +36,7 @@ const Layout = ({
   };
 
   return (
-    <div
-      className="layout"
-      style={{ background: T.bg, fontFamily: "var(--font-family)" }}
-    >
+    <div className="layout">
       <Sidebar
         user={user}
         navigation={navigation}
@@ -54,7 +51,7 @@ const Layout = ({
         <Topbar
           user={user}
           pageTitle={pageTitle}
-          breadcrumbs={breadcrumbs}
+          breadcrumbs={breadcrumbs || route?.breadcrumbs}
           onMenuToggle={handleMenuToggle}
         />
         <PageContainer>{children}</PageContainer>

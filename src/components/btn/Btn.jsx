@@ -1,6 +1,6 @@
 import "./Btn.css";
-import { T } from "../../theme/theme";
 
+// Variants are classes in Btn.css, so they follow the theme and show hover, focus and disabled states without JavaScript.
 const Btn = ({
   children,
   variant = "primary",
@@ -8,55 +8,17 @@ const Btn = ({
   onClick,
   type = "button",
   disabled,
-}) => {
-  const styles = {
-    primary: {
-      background: T.primary,
-      color: T.white,
-      border: `1px solid ${T.primary}`,
-    },
-    ghost: {
-      background: "transparent",
-      color: T.muted,
-      border: `1px solid ${T.border}`,
-    },
-    success: {
-      background: T.success,
-      color: T.white,
-      border: `1px solid ${T.success}`,
-    },
-    danger: {
-      background: T.danger,
-      color: T.white,
-      border: `1px solid ${T.danger}`,
-    },
-    warning: {
-      background: T.warning,
-      color: T.black,
-      border: `1px solid ${T.warning}`,
-    },
-    outline: {
-      background: "transparent",
-      color: T.primary,
-      border: `1px solid ${T.primary}`,
-    },
-  };
-
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      className={`btn ${sm ? "btn-sm" : "btn-md"}`}
-      style={{
-        ...styles[variant],
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      {children}
-    </button>
-  );
-};
+  ...rest
+}) => (
+  <button
+    {...rest}
+    type={type}
+    onClick={onClick}
+    disabled={disabled}
+    className={`btn btn--${variant} ${sm ? "btn-sm" : "btn-md"}`}
+  >
+    {children}
+  </button>
+);
 
 export default Btn;

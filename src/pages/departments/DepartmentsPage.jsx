@@ -1,18 +1,29 @@
 // src/pages/departments/DepartmentsPage.jsx
 
 import { useState } from "react";
-import { Plus, Search, Edit, Trash2, Eye, Check, Building2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Eye, Check, Building2, SearchX } from "lucide-react";
 
-import { T }      from "../../theme/theme";
+import "./Departments.css";
+import { T } from "../../theme/theme";
 import { fdate }  from "../../utils/helpers";
 import Badge      from "../../components/badge/Badge";
-import Avatar     from "../../components/avatar/Avatar";
+import PersonCell from "../../components/person-cell/PersonCell";
+import PageHeader from "../../components/page-header/PageHeader";
+import SearchBar  from "../../components/search-bar/SearchBar";
+import FilterBar  from "../../components/filter-bar/FilterBar";
+import DataTable  from "../../components/data-table/DataTable";
+import EmptyState from "../../components/empty-state/EmptyState";
+import IconButton from "../../components/icon-button/IconButton";
+import DetailList from "../../components/detail-list/DetailList";
+import ConfirmDialog from "../../components/confirm-dialog/ConfirmDialog";
 import Modal      from "../../components/modal/Modal";
 import Input      from "../../components/input/Input";
 import Select     from "../../components/select/Select";
+import Textarea   from "../../components/textarea/Textarea";
 import Btn        from "../../components/btn/Btn";
 import FormFeedback from "../../components/form-feedback/FormFeedback";
 import { guardedSave } from "../../utils/saveErrors";
+import { useToast } from "../../components/toast/toastContext";
 
 const DepartmentsPage = ({
   user,
@@ -22,6 +33,7 @@ const DepartmentsPage = ({
   updateDepartment,
   deleteDepartment,
 }) => {
+  const toast = useToast();
   const [search,    setSearch]    = useState("");
   const [modal,     setModal]     = useState(null);   // "add" | "edit" | "view" | null
   const [selected,  setSelected]  = useState(null);
@@ -29,6 +41,7 @@ const DepartmentsPage = ({
   const [saving,    setSaving]    = useState(false);
   const [deleteErr, setDeleteErr] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [deleting,  setDeleting]  = useState(null);   // the department awaiting "Delete?" confirmation
 
   const isAdmin = user.role === "admin";
 
@@ -74,9 +87,11 @@ const DepartmentsPage = ({
       return;
     }
     setModal(null);
+    toast.success(modal === "add" ? "Department added" : "Department saved");
   };
 
-  const del = async (dept) => {
+  // Deleting asks first, in a dialog. A department that still has people cannot be deleted, so that is said up front.
+  const requestDelete = (dept) => {
     const count = empCount(dept.name);
     if (count > 0) {
       setDeleteErr(
@@ -84,164 +99,114 @@ const DepartmentsPage = ({
       );
       return;
     }
-    if (window.confirm(`Delete department "${dept.name}"?`)) {
-      const result = await guardedSave(() => deleteDepartment(dept.id), { fallback: `"${dept.name}" could not be deleted. Please try again.` });
-      setDeleteErr(result.ok ? "" : result.message);
-    }
+    setDeleteErr("");
+    setDeleting(dept);
   };
+
+  const del = async () => {
+    const dept = deleting;
+    if (!dept) return;
+    setDeleting(null);
+    const result = await guardedSave(() => deleteDepartment(dept.id), { fallback: `"${dept.name}" could not be deleted. Please try again.` });
+    setDeleteErr(result.ok ? "" : result.message);
+    if (result.ok) toast.success("Department deleted");
+  };
+
+  const addButton = <Btn onClick={openAdd}><Plus size={16} aria-hidden="true" />Add department</Btn>;
+  const emptyState = departments.length === 0 ? (
+    <EmptyState
+      icon={Building2}
+      title="No departments yet"
+      description={isAdmin ? "Departments group your people and give each team a manager. Add the first one to get started." : "Departments will be listed here once an administrator creates them."}
+    >
+      {isAdmin && addButton}
+    </EmptyState>
+  ) : filtered.length === 0 ? (
+    <EmptyState icon={SearchX} title="No departments match your search" description={`Nothing matches "${search}". Check the spelling or clear the search.`}>
+      <Btn variant="ghost" onClick={() => setSearch("")}>Clear search</Btn>
+    </EmptyState>
+  ) : null;
 
   // ─────────────────────────────────────────────────────────────────
   return (
     <div>
+      <PageHeader
+        title="Departments"
+        description={`${departments.filter(d => d.status === "Active").length} active · ${departments.length} total`}
+        actions={isAdmin ? addButton : null}
+      />
 
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>Departments</div>
-          <div style={{ fontSize: 12, color: T.muted }}>
-            {departments.filter(d => d.status === "Active").length} active · {departments.length} total
-          </div>
-        </div>
-        {isAdmin && (
-          <Btn onClick={openAdd}><Plus size={14} />Add Department</Btn>
-        )}
-      </div>
+      {deleteErr && <div style={{ marginBottom: 16 }}><FormFeedback>{deleteErr}</FormFeedback></div>}
 
-      {/* ── Delete error banner ─────────────────────────────────── */}
-      {deleteErr && (
-        <div style={{ background: T.dangerGlow, border: `1px solid ${T.danger}30`, color: T.danger, borderRadius: 10, padding: "10px 16px", marginBottom: 16, fontSize: 13 }}>
-          {deleteErr}
-        </div>
-      )}
+      <FilterBar>
+        <SearchBar value={search} onChange={e => setSearch(e.target.value)} placeholder="Search departments…" />
+      </FilterBar>
 
-      {/* ── Search ─────────────────────────────────────────────── */}
-      <div style={{ position: "relative", marginBottom: 16, maxWidth: 320 }}>
-        <Search size={14} color={T.muted} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search departments…"
-          style={{ width: "100%", background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 12px 8px 32px", color: T.text, fontSize: 13, outline: "none" }}
-        />
-      </div>
-
-      {/* ── Table ──────────────────────────────────────────────── */}
-      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table className="data-table">
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                {["Department Name", "Manager", "Total Employees", "Status", "Actions"].map(h => (
-                  <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: 0.8, whiteSpace: "nowrap" }}>
-                    {h}
-                  </th>
-                ))}
+      <DataTable label="Departments" empty={emptyState}>
+        <thead>
+          <tr>
+            <th>Department</th>
+            <th>Manager</th>
+            <th>People</th>
+            <th>Status</th>
+            <th><span className="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map(dept => {
+            const mgr   = getManager(dept.managerId);
+            const count = empCount(dept.name);
+            return (
+              <tr key={dept.id}>
+                <td data-primary>
+                  <div className="dept-name">
+                    <span className="dept-icon"><Building2 size={16} color={T.primaryText} aria-hidden="true" /></span>
+                    <div className="dept-name__text">
+                      <span style={{ fontWeight: 500 }}>{dept.name}</span>
+                      {dept.description && <span className="cell-sub cell-truncate">{dept.description}</span>}
+                    </div>
+                  </div>
+                </td>
+                <td data-label="Manager">{mgr ? <PersonCell emp={mgr} size={28} /> : <span style={{ color: T.muted }}>—</span>}</td>
+                <td data-label="People" className="cell-number">{count} {count === 1 ? "employee" : "employees"}</td>
+                <td data-label="Status"><Badge s={dept.status === "Active" ? "active" : "inactive"} /></td>
+                <td className="cell-actions">
+                  <div className="row-actions">
+                    <IconButton icon={Eye} label={`View ${dept.name}`} onClick={() => openView(dept)} />
+                    {isAdmin && (
+                      <>
+                        <IconButton icon={Pencil} label={`Edit ${dept.name}`} onClick={() => openEdit(dept)} />
+                        <IconButton icon={Trash2} variant="danger" label={`Delete ${dept.name}`} onClick={() => requestDelete(dept)} />
+                      </>
+                    )}
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ padding: "40px 16px", textAlign: "center", color: T.muted, fontSize: 13 }}>
-                    {departments.length === 0
-                      ? "No departments yet. Click \"Add Department\" to create one."
-                      : "No departments match your search."}
-                  </td>
-                </tr>
-              ) : filtered.map(dept => {
-                const mgr   = getManager(dept.managerId);
-                const count = empCount(dept.name);
-                return (
-                  <tr
-                    key={dept.id}
-                    style={{ borderBottom: `1px solid ${T.border}`, transition: "background .15s" }}
-                    onMouseEnter={e => (e.currentTarget.style.background = T.cardHover)}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                  >
-                    {/* Name + icon */}
-                    <td style={{ padding: "12px 16px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ width: 34, height: 34, borderRadius: 10, background: `${T.primary}20`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          <Building2 size={15} color={T.primary} />
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{dept.name}</div>
-                          <div style={{ fontSize: 11, color: T.muted, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {dept.description || "—"}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
+            );
+          })}
+        </tbody>
+      </DataTable>
 
-                    {/* Manager */}
-                    <td style={{ padding: "12px 16px" }}>
-                      {mgr ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <Avatar emp={mgr} size={26} />
-                          <span style={{ fontSize: 13, color: T.mutedLight }}>{mgr.name}</span>
-                        </div>
-                      ) : (
-                        <span style={{ fontSize: 13, color: T.muted }}>—</span>
-                      )}
-                    </td>
-
-                    {/* Count */}
-                    <td style={{ padding: "12px 16px" }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{count}</span>
-                      <span style={{ fontSize: 11, color: T.muted, marginLeft: 4 }}>
-                        {count === 1 ? "employee" : "employees"}
-                      </span>
-                    </td>
-
-                    {/* Status */}
-                    <td style={{ padding: "12px 16px" }}>
-                      <Badge s={dept.status === "Active" ? "active" : "inactive"} />
-                    </td>
-
-                    {/* Actions */}
-                    <td style={{ padding: "12px 16px" }}>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button
-                          onClick={() => openView(dept)}
-                          style={{ background: T.primaryGlow, border: "none", color: T.primary, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}
-                        >
-                          <Eye size={13} />
-                        </button>
-                        {isAdmin && (
-                          <>
-                            <button
-                              onClick={() => openEdit(dept)}
-                              style={{ background: T.warningTint, border: "none", color: T.warning, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}
-                            >
-                              <Edit size={13} />
-                            </button>
-                            <button
-                              onClick={() => del(dept)}
-                              style={{ background: T.dangerGlow, border: "none", color: T.danger, padding: "5px 8px", borderRadius: 6, cursor: "pointer" }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {deleting && (
+        <ConfirmDialog
+          title="Delete this department?"
+          message={`"${deleting.name}" will be removed. This cannot be undone.`}
+          confirmLabel="Delete department"
+          onConfirm={del}
+          onClose={() => setDeleting(null)}
+        />
+      )}
 
       {/* ── Add / Edit Modal ─────────────────────────────────────── */}
       {(modal === "add" || modal === "edit") && (
         <Modal
-          title={modal === "add" ? "Add Department" : "Edit Department"}
+          title={modal === "add" ? "Add department" : "Edit department"}
           onClose={() => setModal(null)}
           wide
         >
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+          <div className="form-grid">
             <Input
-              label="Department Name"
+              label="Department name"
               value={form.name || ""}
               onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
             />
@@ -251,7 +216,7 @@ const DepartmentsPage = ({
               value={String(form.managerId || "")}
               onChange={e => setForm(p => ({ ...p, managerId: e.target.value }))}
             >
-              <option value="">— Select Manager —</option>
+              <option value="">No manager</option>
               {managerChoices
                 .map(e => (
                   <option key={e.id} value={e.id}>
@@ -259,38 +224,31 @@ const DepartmentsPage = ({
                   </option>
                 ))}
             </Select>
-          </div>
-
-          {/* Description — full width */}
-          <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", fontSize: 12, color: T.muted, marginBottom: 6, fontWeight: 600 }}>
-              Description
-            </label>
-            <textarea
+            <Textarea
+              className="form-grid__full"
+              label="Description"
               value={form.description || ""}
               onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
               rows={3}
-              placeholder="Brief description of this department…"
-              style={{ width: "100%", background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: "9px 12px", color: T.text, fontSize: 13, outline: "none", resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
+              placeholder="A short description of this department"
             />
+            <Select
+              label="Status"
+              value={form.status || "Active"}
+              onChange={e => setForm(p => ({ ...p, status: e.target.value }))}
+            >
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </Select>
           </div>
-
-          <Select
-            label="Status"
-            value={form.status || "Active"}
-            onChange={e => setForm(p => ({ ...p, status: e.target.value }))}
-          >
-            <option value="Active">Active</option>
-            <option value="Inactive">Inactive</option>
-          </Select>
 
           <FormFeedback>{saveError}</FormFeedback>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+          <div className="modal-actions">
             <Btn variant="ghost" onClick={() => setModal(null)}>Cancel</Btn>
             <Btn onClick={save} disabled={saving || !form.name?.trim()}>
-              <Check size={13} />
-              {saving ? "Saving…" : modal === "add" ? "Add Department" : "Save Changes"}
+              <Check size={16} aria-hidden="true" />
+              {saving ? "Saving…" : modal === "add" ? "Add department" : "Save changes"}
             </Btn>
           </div>
         </Modal>
@@ -298,68 +256,36 @@ const DepartmentsPage = ({
 
       {/* ── View Modal ───────────────────────────────────────────── */}
       {modal === "view" && selected && (
-        <Modal title="Department Details" onClose={() => setModal(null)} wide>
-
-          {/* Header */}
-          <div style={{ textAlign: "center", marginBottom: 24 }}>
-            <div style={{ width: 56, height: 56, borderRadius: 14, background: `${T.primary}20`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
-              <Building2 size={24} color={T.primary} />
-            </div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{selected.name}</div>
-            {selected.description && (
-              <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{selected.description}</div>
-            )}
-            <div style={{ marginTop: 8 }}>
-              <Badge s={selected.status === "Active" ? "active" : "inactive"} />
-            </div>
+        <Modal title="Department details" onClose={() => setModal(null)} wide>
+          <div className="dept-hero">
+            <span className="dept-icon dept-icon--lg"><Building2 size={24} color={T.primaryText} aria-hidden="true" /></span>
+            <div className="dept-hero__name">{selected.name}</div>
+            {selected.description && <div className="dept-hero__description">{selected.description}</div>}
+            <Badge s={selected.status === "Active" ? "active" : "inactive"} />
           </div>
 
-          {/* Details rows */}
-          {[
-            ["Manager",         viewManager?.name || "—"],
-            ["Total Employees", `${viewDeptEmps.length} employee${viewDeptEmps.length !== 1 ? "s" : ""}`],
-            ["Status",          selected.status],
-            ["Created Date",    fdate(selected.createdAt)],
-          ].map(([k, v]) => (
-            <div
-              key={k}
-              style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: `1px solid ${T.border}` }}
-            >
-              <span style={{ fontSize: 12, color: T.muted,  fontWeight: 600 }}>{k}</span>
-              <span style={{ fontSize: 13, color: T.text,   fontWeight: 500 }}>{v}</span>
-            </div>
-          ))}
+          <DetailList items={[
+            ["Manager",       viewManager?.name || "—"],
+            ["People",        `${viewDeptEmps.length} employee${viewDeptEmps.length !== 1 ? "s" : ""}`],
+            ["Status",        selected.status],
+            ["Created",       fdate(selected.createdAt)],
+          ]} />
 
-          {/* Employee list */}
-          {viewDeptEmps.length > 0 && (
-            <div style={{ marginTop: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 12 }}>
-                Employees ({viewDeptEmps.length})
-              </div>
+          {viewDeptEmps.length > 0 ? (
+            <div className="dept-people">
+              <div className="dept-people__title">People ({viewDeptEmps.length})</div>
               {viewDeptEmps.map(emp => (
-                <div
-                  key={emp.id}
-                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${T.border}` }}
-                >
-                  <Avatar emp={emp} size={34} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{emp.name}</div>
-                    <div style={{ fontSize: 11, color: T.muted }}>{emp.pos}</div>
-                  </div>
+                <div key={emp.id} className="dept-people__row">
+                  <PersonCell emp={emp} sub={emp.pos} />
                   <Badge s={emp.status} />
                 </div>
               ))}
             </div>
-          )}
-
-          {viewDeptEmps.length === 0 && (
-            <div style={{ marginTop: 20, textAlign: "center", color: T.muted, fontSize: 13, padding: "20px 0" }}>
-              No employees assigned to this department yet.
-            </div>
+          ) : (
+            <div className="dept-people__none">No employees are assigned to this department yet.</div>
           )}
         </Modal>
       )}
-
     </div>
   );
 };

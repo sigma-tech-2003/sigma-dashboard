@@ -1,0 +1,124 @@
+/*
+  One set of rules for every form control. Labels are sentence case at 13px; the control border uses --color-border-control
+  (3:1 against the card) so the edge of an input can actually be seen; the focus ring comes from index.css.
+*/
+.input-wrapper,
+.select-wrapper,
+.textarea-wrapper,
+.form-field {
+  margin-bottom: var(--space-6);
+}
+
+.input-label,
+.select-label,
+.textarea-label,
+.form-field__label {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--color-muted-light);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.input-field,
+.select-field,
+.textarea-field {
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  background: var(--color-card);
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  transition: border-color var(--transition-fast);
+}
+
+.textarea-field {
+  min-height: 88px;
+  padding: var(--space-3) var(--space-4);
+  resize: vertical;
+  line-height: var(--line-height-body);
+}
+
+.select-field {
+  cursor: pointer;
+}
+
+.input-field::placeholder,
+.textarea-field::placeholder {
+  color: var(--color-muted);
+}
+
+.input-field:hover:not(:disabled),
+.select-field:hover:not(:disabled),
+.textarea-field:hover:not(:disabled) {
+  border-color: var(--color-muted);
+}
+
+.input-field:focus,
+.select-field:focus,
+.textarea-field:focus {
+  border-color: var(--color-primary-text);
+}
+
+.input-field:disabled,
+.select-field:disabled,
+.textarea-field:disabled {
+  background: var(--color-bg);
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+
+.input-field[aria-invalid="true"],
+.select-field[aria-invalid="true"],
+.textarea-field[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.field-error {
+  margin-top: var(--space-1);
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
+}
+
+.field-hint {
+  margin-top: var(--space-1);
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* Two columns once there is room, one on a phone. A field that must span both takes .form-grid__full. */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  column-gap: var(--space-6);
+}
+
+.form-grid__full {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 640px) {
+  .form-grid--3 {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+/* A field inside a FilterBar sits on the bar's baseline and keeps a sensible width */
+.filter-field {
+  min-width: 180px;
+  margin-bottom: 0;
+}
+
+@media (max-width: 639px) {
+  .filter-field {
+    width: 100%;
+  }
+}

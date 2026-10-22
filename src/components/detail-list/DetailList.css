@@ -1,0 +1,22 @@
+.detail-list__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-6);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.detail-list__row dt {
+  flex-shrink: 0;
+  color: var(--color-muted-light);
+  font-size: var(--font-size-sm);
+}
+
+.detail-list__row dd {
+  min-width: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
