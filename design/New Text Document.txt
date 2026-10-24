@@ -1,0 +1,45 @@
+// 1) Har variation mein 3 fields
+add_action('woocommerce_product_after_variable_attributes', function($loop, $data, $variation){
+    $fields = ['bari_label'=>'Label tab content','bari_benefits'=>'Benefits tab content','bari_ingredients'=>'Ingredients tab content'];
+    foreach($fields as $key=>$label){
+        woocommerce_wp_textarea_input([
+            'id'=>"{$key}_{$loop}", 'name'=>"{$key}[{$loop}]", 'label'=>$label,
+            'value'=>get_post_meta($variation->ID, "_{$key}", true),
+            'wrapper_class'=>'form-row form-row-full', 'rows'=>4,
+            'desc_tip'=>true, 'description'=>'Khali chhorein to default content dikhega. HTML allowed.',
+        ]);
+    }
+}, 10, 3);
+
+// 2) Save
+add_action('woocommerce_save_product_variation', function($id, $i){
+    foreach(['bari_label','bari_benefits','bari_ingredients'] as $key){
+        if(isset($_POST[$key][$i])) update_post_meta($id, "_{$key}", wp_kses_post(wp_unslash($_POST[$key][$i])));
+    }
+}, 10, 2);
+
+// 3) Data frontend ko bhejna
+add_filter('woocommerce_available_variation', function($d, $product, $variation){
+    foreach(['bari_label','bari_benefits','bari_ingredients'] as $key){
+        $v = get_post_meta($variation->get_id(), "_{$key}", true);
+        $d[$key] = $v ? wpautop(do_shortcode($v)) : '';
+    }
+    return $d;
+}, 10, 3);
+
+// 4) Variation select karne par tab content badalna
+add_action('wp_footer', function(){ if(!is_product()) return; ?>
+<script>
+jQuery(function($){
+  var map={bari_label:'#tab-wb_cptb_1',bari_benefits:'#tab-wb_cptb_2',bari_ingredients:'#tab-wb_cptb_3'}, orig={};
+  $.each(map,function(k,s){orig[k]=$(s).html();});
+  $('.variations_form').on('found_variation',function(e,v){
+    $.each(map,function(k,s){
+      if(!$(s).length) return;
+      if(v[k]){var h=$('<div>').html(orig[k]).find('h2').first().prop('outerHTML')||'';$(s).html(h+v[k]);}
+      else $(s).html(orig[k]);
+    });
+  }).on('reset_data',function(){ $.each(map,function(k,s){$(s).html(orig[k]);}); });
+});
+</script>
+<?php });

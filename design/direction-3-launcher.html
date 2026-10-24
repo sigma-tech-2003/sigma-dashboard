@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sigma HRM · Direction 3 · Launcher</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Launcher: one centred column, led by a command bar. Warm graphite surfaces; a single orange accent. */
+:root{
+  --bg:#121110; --panel:#191817; --raise:#1f1d1b; --line:#2a2725; --line-2:#37332f;
+  --text:#f3f0ea; --muted:#a39d93; --dim:#726c63; --accent:#ff6a3d; --ok:#7bc29a;
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{color-scheme:dark}
+body{background:var(--bg);color:var(--text);font:15px/1.55 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.num{font-variant-numeric:tabular-nums}
+kbd{font:500 12px/1 Inter,system-ui,sans-serif;color:var(--dim);border:1px solid var(--line-2);border-radius:6px;padding:4px 6px;background:var(--raise)}
+
+.wrap{max-width:720px;margin:0 auto;padding:40px 20px 96px}
+.head{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:14px}
+.brand{display:flex;align-items:center;gap:10px;color:var(--text);font-weight:600;letter-spacing:-.015em}
+.brand i{width:22px;height:22px;border-radius:6px;background:var(--text);color:var(--bg);display:grid;place-items:center;font-style:normal;font-size:12px}
+.me{display:flex;align-items:center;gap:12px}
+.av{width:28px;height:28px;border-radius:50%;background:var(--raise);border:1px solid var(--line-2);color:var(--text);display:grid;place-items:center;font-size:12px;font-weight:500}
+
+.cmd{position:relative;margin-top:44px}
+.bar{display:flex;align-items:center;gap:12px;height:58px;padding:0 18px;background:var(--panel);border:1px solid var(--line);border-radius:14px;transition:border-color .12s}
+.bar:focus-within{border-color:var(--line-2)}
+.bar svg{width:19px;height:19px;color:var(--dim);flex:none}
+.bar input{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;color:var(--text);font:inherit;font-size:17px}
+.bar input::placeholder{color:var(--dim)}
+.drop{position:absolute;left:0;right:0;top:calc(100% + 8px);z-index:10;background:#1b1a18;border:1px solid var(--line-2);border-radius:14px;box-shadow:0 22px 60px rgba(0,0,0,.5);padding:6px;display:none;max-height:380px;overflow:auto}
+.drop.on{display:block;animation:pop .12s var(--ease)}
+@keyframes pop{from{opacity:0;transform:translateY(-4px)}}
+.drop .g{padding:10px 12px 4px;color:var(--dim);font-size:12px}
+.drop button{display:flex;align-items:center;justify-content:space-between;width:100%;height:40px;padding:0 12px;border-radius:9px;color:var(--muted);text-align:left}
+.drop button[aria-selected=true]{background:var(--raise);color:var(--text)}
+.drop .none{padding:18px 12px;color:var(--dim)}
+
+h1{margin-top:56px;font-size:30px;font-weight:600;letter-spacing:-.03em;line-height:1.15}
+.sub{margin-top:6px;color:var(--muted)}
+.sec{margin-top:36px}
+.sec>h2{font-size:13px;font-weight:500;color:var(--dim);margin-bottom:10px}
+.today{list-style:none;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+.t{border-top:1px solid var(--line)}
+.t:first-child{border-top:0}
+.t-row{display:flex;align-items:center;gap:14px;padding:16px 18px;cursor:pointer;transition:background .12s}
+.t-row:hover{background:rgba(255,255,255,.025)}
+.rk{flex:none;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line-2);display:grid;place-items:center;font-size:12px;color:var(--dim);transition:background .15s,border-color .15s,color .15s}
+.t.done .rk{background:var(--ok);border-color:var(--ok);color:#10201a}
+.t-main{flex:1;min-width:0}
+.t-main b{display:block;font-weight:500;transition:color .15s}
+.t-main span{display:block;color:var(--muted);font-size:14px}
+.t.done .t-main b{color:var(--dim);text-decoration:line-through;text-decoration-color:var(--dim)}
+.chev{width:16px;height:16px;color:var(--dim);transition:transform .15s var(--ease);flex:none}
+.t.open .chev{transform:rotate(90deg)}
+.btn{height:32px;padding:0 13px;white-space:nowrap;border-radius:8px;border:1px solid var(--line-2);font-size:14px;font-weight:500;transition:background .12s,transform .12s}
+.btn:hover{background:var(--raise)}.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#1a0c07}
+.btn.primary:hover{background:#ff7d55}
+.sub-l{display:grid;grid-template-rows:0fr;transition:grid-template-rows .16s var(--ease)}
+.t.open .sub-l{grid-template-rows:1fr}
+.sub-l>div{overflow:hidden}
+.sub-l ul{list-style:none;padding:0 18px 8px 54px}
+.s{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line);overflow:hidden;max-height:150px;transition:opacity .15s,max-height .18s var(--ease),padding .18s var(--ease)}
+.s.gone{opacity:0;max-height:0;padding-top:0;padding-bottom:0}
+.s div{flex:1;min-width:0}.s b{font-weight:500;display:block}.s span{color:var(--muted);font-size:14px}
+.s .no{color:var(--muted)}
+.glance{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.g1{padding:18px 20px;border-left:1px solid var(--line)}
+.g1:first-child{border-left:0}
+.g1 b{display:block;font-size:26px;font-weight:600;letter-spacing:-.03em;line-height:1.1}
+.g1 span{display:block;margin-top:6px;color:var(--muted);font-size:14px}
+.people-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.people-h h2{font-size:13px;font-weight:500;color:var(--dim)}
+.seg{position:relative;display:flex;gap:2px}
+.seg button{position:relative;z-index:1;padding:3px 10px;font-size:13px;color:var(--muted);border-radius:7px;transition:color .12s}
+.seg button[aria-pressed=true]{color:var(--text)}
+.seg .pill{position:absolute;top:0;left:0;height:100%;border-radius:7px;background:var(--raise);border:1px solid var(--line);transition:transform .15s var(--ease),width .15s var(--ease)}
+.plist{list-style:none;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+.p{display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line);transition:background .12s}
+.p:first-child{border-top:0}
+.p:hover{background:rgba(255,255,255,.025)}
+.p.hl{background:var(--raise)}
+.p div{flex:1;min-width:0}.p b{font-weight:500}.p span.d{color:var(--muted);font-size:14px;margin-left:8px}
+.p .r{color:var(--muted);font-size:14px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:7px}
+.dot.off{background:var(--dim)}
+.foot{margin-top:40px;color:var(--dim);font-size:13px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,6px);padding:9px 14px;background:var(--raise);border:1px solid var(--line-2);border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .12s,transform .12s var(--ease);z-index:30}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.rise{opacity:0;transform:translateY(6px);animation:rise .18s var(--ease) forwards}
+@keyframes rise{to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.rise{opacity:1;transform:none}}
+@media (max-width:560px){.sub-l ul{padding:0 18px 8px}.s{flex-wrap:wrap}.s div{flex:1 1 100%}.t-main{flex:1 1 140px}h1{font-size:25px}.glance{grid-template-columns:1fr}.g1{border-left:0;border-top:1px solid var(--line)}.g1:first-child{border-top:0}.p .r{display:none}.bar kbd{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head rise"><div class="brand"><i>Σ</i>Sigma</div><div class="me"><span>Thursday, 24 October</span><span class="av" title="Hanna Hussain">HH</span></div></header>
+
+  <div class="cmd rise" style="animation-delay:30ms">
+    <label class="bar" for="q">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" placeholder="Ask or jump to anything" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="drop" aria-label="Command">
+      <kbd>Ctrl K</kbd>
+    </label>
+    <div class="drop" id="drop" role="listbox"></div>
+  </div>
+
+  <h1 class="rise" style="animation-delay:60ms">Good morning, Hanna.</h1>
+  <p class="sub rise" style="animation-delay:60ms" id="sub">Three things need you today.</p>
+
+  <section class="sec rise" style="animation-delay:90ms" aria-label="Today">
+    <h2>Today</h2>
+    <ul class="today" id="today">
+      <li class="t open" id="t1">
+        <div class="t-row" id="t1r" role="button" tabindex="0" aria-expanded="true"><span class="rk">1</span>
+          <div class="t-main"><b id="t1b">Decide 3 leave requests</b><span id="t1s">Oldest has been waiting since 22 October</span></div>
+          <button class="btn primary" id="all">Approve all</button>
+          <svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"/></svg></div>
+        <div class="sub-l"><div><ul id="reqs"></ul></div></div>
+      </li>
+      <li class="t" id="t2"><div class="t-row" role="button" tabindex="0"><span class="rk">2</span>
+        <div class="t-main"><b>Finish 2 overdue KPI reviews</b><span>Esha Employee and Bilal Raza</span></div><button class="btn" data-demo="Opening KPI reviews">Open</button></div></li>
+      <li class="t" id="t3"><div class="t-row" role="button" tabindex="0"><span class="rk">3</span>
+        <div class="t-main"><b>Process October payroll</b><span>Closes in 6 days · 9 people · PKR 326,100</span></div><button class="btn" data-demo="Opening payroll">Review</button></div></li>
+    </ul>
+  </section>
+
+  <section class="sec rise" style="animation-delay:120ms" aria-label="At a glance">
+    <h2>At a glance</h2>
+    <div class="glance">
+      <div class="g1"><b class="num">PKR 326,100</b><span>net payroll, up 8.3%</span></div>
+      <div class="g1"><b class="num">8 of 9</b><span>clocked in today</span></div>
+      <div class="g1"><b class="num">7.5</b><span>team KPI average</span></div>
+    </div>
+  </section>
+
+  <section class="sec rise" style="animation-delay:150ms" aria-label="People">
+    <div class="people-h"><h2>People</h2>
+      <div class="seg" id="seg" role="group" aria-label="Filter by department"><span class="pill" id="pill"></span>
+        <button aria-pressed="true" data-d="">All</button><button aria-pressed="false" data-d="Engineering">Engineering</button><button aria-pressed="false" data-d="Administration">Administration</button></div>
+    </div>
+    <ul class="plist" id="plist"></ul>
+  </section>
+  <p class="foot">Sample data for design review. Not connected to the app.</p>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function(){
+var $=function(s,r){return (r||document).querySelector(s)},$$=function(s,r){return [].slice.call((r||document).querySelectorAll(s))};
+var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+var P=[['Hanna Hussain','Administration','HR lead',1],['Maya Mirza','Engineering','Engineering manager',1],['Tariq Tahir','Engineering','Team lead',1],['Esha Employee','Engineering','Developer III',1],['Bilal Raza','Engineering','Developer II',1],['Sara Ali','Administration','Coordinator',1],['Usman Sheikh','Engineering','QA analyst',1],['Amna Tariq','Administration','Accountant',1],['Zara Hussain','Administration','Designer',0]];
+function ini(n){return n.split(' ').map(function(x){return x[0]}).join('').slice(0,2)}
+var tt;function toast(m){var t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(function(){t.classList.remove('on')},1800)}
+
+/* today: leave requests, inline */
+var R=[['Sara Ali','Annual leave · 12 to 14 Nov · 3 days'],['Bilal Raza','Sick leave · 20 Nov · 1 day'],['Tariq Tahir','Casual leave · 25 Nov · 1 day']],left=3;
+$('#reqs').innerHTML=R.map(function(r){return '<li class="s"><div><b>'+r[0]+'</b><span>'+r[1]+'</span></div><button class="btn no" data-a="no">Decline</button><button class="btn" data-a="ok">Approve</button></li>'}).join('');
+function remain(){var open=3;[ '#t1','#t2','#t3' ].forEach(function(id){if($(id).classList.contains('done'))open--});$('#sub').textContent=open?(open===3?'Three':open===2?'Two':'One')+' thing'+(open===1?' needs':'s need')+' you today.':'You are clear for today.'}
+function settle(){left--;if(!left){var t=$('#t1');t.classList.add('done');t.classList.remove('open');$('#t1b').textContent='Decided all 3 leave requests';$('#t1s').textContent='Nothing left in the queue';$('#all').style.display='none';$('.rk',t).textContent='✓';$('#t1r').setAttribute('aria-expanded','false')}else{$('#t1b').textContent='Decide '+left+' leave request'+(left>1?'s':'')}remain()}
+function decide(li,ok){if(li.classList.contains('gone'))return;li.classList.add('gone');toast((ok?'Approved ':'Declined ')+$('b',li).textContent+"'s leave");settle()}
+$('#reqs').addEventListener('click',function(e){var b=e.target.closest('[data-a]');if(b)decide(b.closest('.s'),b.dataset.a==='ok')});
+function approveAll(){$$('.s:not(.gone)',$('#reqs')).forEach(function(li,i){setTimeout(function(){decide(li,true)},reduce?0:i*80)})}
+$('#all').addEventListener('click',function(e){e.stopPropagation();approveAll()});
+function toggle(){var t=$('#t1');if(t.classList.contains('done'))return;var o=t.classList.toggle('open');$('#t1r').setAttribute('aria-expanded',o)}
+$('#t1r').addEventListener('click',toggle);$('#t1r').addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===' ')&&e.target===this){e.preventDefault();toggle()}});
+$$('[data-demo]').forEach(function(b){b.addEventListener('click',function(e){e.stopPropagation();toast(b.dataset.demo+' is not part of this mockup')})});
+
+/* people */
+var pl=$('#plist'),dept='';
+function render(){pl.innerHTML=P.filter(function(p){return !dept||p[1]===dept}).map(function(p){return '<li class="p" data-n="'+p[0]+'"><span class="av">'+ini(p[0])+'</span><div><b>'+p[0]+'</b><span class="d">'+p[1]+'</span></div><span class="r"><span class="dot'+(p[3]?'':' off')+'"></span>'+p[2]+'</span></li>'}).join('')}
+render();
+var seg=$('#seg'),pill=$('#pill');
+function mv(b){pill.style.width=b.offsetWidth+'px';pill.style.transform='translateX('+b.offsetLeft+'px)'}
+seg.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;$$('button',seg).forEach(function(x){x.setAttribute('aria-pressed',x===b)});mv(b);dept=b.dataset.d;render()});
+mv($('button[aria-pressed=true]',seg));
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){mv($('button[aria-pressed=true]',seg))});
+addEventListener('resize',function(){mv($('button[aria-pressed=true]',seg))});
+
+/* command bar */
+var q=$('#q'),drop=$('#drop'),items=[],sel=0;
+var CMD=[['Go to','Leave'],['Go to','Employees'],['Go to','Payroll'],['Go to','KPI reviews'],['Go to','Reports'],['Actions','Approve all leave requests'],['Actions','Process payroll'],['Actions','Add an employee']];
+function build(term){term=term.toLowerCase();var all=CMD.map(function(c){return {g:c[0],t:c[1],k:c[0]==='Go to'?'go':c[1].indexOf('Approve')===0?'all':'act'}}).concat(P.map(function(p){return {g:'People',t:p[0],s:p[2],k:'person'}}));
+ items=all.filter(function(i){return !term||i.t.toLowerCase().indexOf(term)>-1}).slice(0,8);sel=0;var h='',g='';
+ items.forEach(function(i,n){if(i.g!==g){g=i.g;h+='<div class="g">'+g+'</div>'}h+='<button role="option" data-n="'+n+'" aria-selected="'+(n===0)+'"><span>'+i.t+'</span><span style="color:var(--dim);font-size:13px">'+(i.s||'')+'</span></button>'});
+ drop.innerHTML=h||'<div class="none">Nothing matches. Try a name or a page.</div>'}
+function open(){build(q.value);drop.classList.add('on');q.setAttribute('aria-expanded','true')}
+function close(){drop.classList.remove('on');q.setAttribute('aria-expanded','false')}
+function mark(){$$('button',drop).forEach(function(b){b.setAttribute('aria-selected',+b.dataset.n===sel)});var b=$('button[aria-selected=true]',drop);if(b)b.scrollIntoView({block:'nearest'})}
+function run(i){close();if(!i)return;q.value='';if(i.k==='all'){$('#t1').classList.add('open');approveAll()}else if(i.k==='person'){var all=$('#seg button');all.click();var li=$$('.p',pl).filter(function(x){return x.dataset.n===i.t})[0];if(li){li.scrollIntoView({block:'center',behavior:reduce?'auto':'smooth'});li.classList.add('hl');setTimeout(function(){li.classList.remove('hl')},1400)}}else toast(i.t+' is not part of this mockup')}
+q.addEventListener('focus',open);q.addEventListener('input',open);
+q.addEventListener('keydown',function(e){if(e.key==='ArrowDown'){e.preventDefault();sel=Math.min(items.length-1,sel+1);mark()}else if(e.key==='ArrowUp'){e.preventDefault();sel=Math.max(0,sel-1);mark()}else if(e.key==='Enter'){run(items[sel])}else if(e.key==='Escape'){close();q.blur()}});
+drop.addEventListener('mousedown',function(e){e.preventDefault()});
+drop.addEventListener('click',function(e){var b=e.target.closest('button');if(b)run(items[+b.dataset.n])});
+document.addEventListener('click',function(e){if(!e.target.closest('.cmd'))close()});
+document.addEventListener('keydown',function(e){if(((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k')||(e.key==='/'&&!/input|textarea/i.test(e.target.tagName))){e.preventDefault();q.focus();q.select()}});
+})();
+</script>
+</body>
+</html>

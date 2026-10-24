@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sigma HRM · Direction 2 · Paper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Paper: white and ink. Hierarchy comes from scale, not boxes. The only colour is the blue on the one primary button. */
+:root{
+  --bg:#ffffff; --text:#0a0a0a; --muted:#666666; --dim:#8f8f8f; --line:#ebebeb; --bar:#e6e6e6; --hover:#fafafa;
+  --accent:#0070f3; --on-accent:#ffffff;
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+[data-theme=dark]{--bg:#000000; --text:#ededed; --muted:#a1a1a1; --dim:#707070; --line:#1f1f1f; --bar:#262626; --hover:#0a0a0a}
+*{box-sizing:border-box;margin:0;padding:0}
+html{color-scheme:light}[data-theme=dark]{color-scheme:dark}
+body{background:var(--bg);color:var(--text);font:15px/1.55 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;transition:background .15s,color .15s}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+.num{font-variant-numeric:tabular-nums}
+
+.bar{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+.bar-in{max-width:1120px;margin:0 auto;padding:0 32px;height:60px;display:flex;align-items:center;gap:36px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.02em}
+.brand i{width:22px;height:22px;background:var(--text);color:var(--bg);border-radius:5px;display:grid;place-items:center;font-style:normal;font-size:12px}
+.tabs{position:relative;display:flex;gap:4px;height:100%;align-items:stretch;flex:1;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{position:relative;padding:0 12px;color:var(--muted);font-size:14px;white-space:nowrap;transition:color .12s}
+.tabs button:hover{color:var(--text)}
+.tabs button[aria-current=page]{color:var(--text)}
+.tabs .u{position:absolute;bottom:-1px;left:0;height:2px;width:40px;background:var(--text);transition:transform .15s var(--ease),width .15s var(--ease)}
+.tools{display:flex;align-items:center;gap:14px}
+.ghost{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--muted);transition:color .12s,background .12s}
+.ghost:hover{color:var(--text);background:var(--hover)}
+.ghost svg{width:17px;height:17px}
+.av{width:28px;height:28px;border-radius:50%;background:var(--text);color:var(--bg);display:grid;place-items:center;font-size:12px;font-weight:600}
+
+.page{max-width:1120px;margin:0 auto;padding:72px 32px 96px}
+.eyebrow{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px}
+.eyebrow b{font-weight:500;color:var(--text)}
+.hero{font-size:clamp(54px,11.5vw,112px);font-weight:600;letter-spacing:-.055em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums}
+.delta{margin-top:18px;color:var(--muted);display:flex;gap:18px;flex-wrap:wrap;font-size:15px}
+.delta b{color:var(--text);font-weight:500}
+.split{display:grid;grid-template-columns:minmax(0,1.9fr) minmax(0,1fr);gap:72px;margin-top:64px;align-items:end}
+.bars{display:flex;align-items:flex-end;gap:14px;height:200px}
+.col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;cursor:default;position:relative}
+.col .b{background:var(--bar);border-radius:4px 4px 0 0;transform-origin:50% 100%;transition:background .12s}
+.col.on .b{background:var(--text)}
+.col .v{position:absolute;left:0;right:0;text-align:center;font-size:13px;color:var(--text);opacity:0;transform:translateY(3px);transition:opacity .12s,transform .12s var(--ease);font-variant-numeric:tabular-nums}
+.col.on .v{opacity:1;transform:none}
+.labels{display:flex;gap:14px;margin-top:10px;color:var(--dim);font-size:13px}
+.labels span{flex:1;text-align:center}
+.facts{display:flex;flex-direction:column}
+.fact{padding:20px 0;border-top:1px solid var(--line)}
+.fact:last-child{border-bottom:1px solid var(--line)}
+.fact b{display:block;font-size:44px;font-weight:600;letter-spacing:-.045em;line-height:1}
+.fact span{display:block;margin-top:8px;color:var(--muted);font-size:14px}
+.lower{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:72px;margin-top:96px}
+.sh{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:6px}
+.sh h2{font-size:20px;font-weight:600;letter-spacing:-.03em}
+.btn{height:34px;padding:0 14px;white-space:nowrap;border-radius:8px;font-size:14px;font-weight:500;transition:transform .12s,background .12s,opacity .12s}
+.btn.primary{background:var(--accent);color:var(--on-accent)}
+.btn.primary:hover{opacity:.9}.btn.primary:active{transform:translateY(1px)}
+.btn.primary[disabled]{background:var(--bar);color:var(--dim);cursor:default}
+.leave{list-style:none;margin-top:10px}
+.lv{display:flex;align-items:center;gap:14px;padding:16px 0;border-top:1px solid var(--line);overflow:hidden;max-height:130px;transition:opacity .15s,max-height .18s var(--ease),padding .18s var(--ease)}
+.lv.gone{opacity:0;max-height:0;padding-top:0;padding-bottom:0}
+.lv div{flex:1;min-width:0}
+.lv b{display:block;font-weight:500}
+.lv span{color:var(--muted);font-size:14px}
+.lv button.t{color:var(--muted);font-size:14px;padding:6px 8px;border-radius:6px;transition:color .12s,background .12s}
+.lv button.t:hover{color:var(--text);background:var(--hover)}
+.none{color:var(--muted);padding:20px 0;border-top:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th{text-align:left;font-weight:400;color:var(--dim);font-size:13px;padding:10px 0;border-bottom:1px solid var(--line)}
+th button{display:inline-flex;gap:6px;align-items:center;color:inherit;transition:color .12s}
+th button:hover,th button[data-s]{color:var(--text)}
+th .ar{display:inline-block;width:8px;opacity:0;transition:opacity .12s,transform .15s var(--ease)}
+th button[data-s] .ar{opacity:1}
+th button[data-s=desc] .ar{transform:rotate(180deg)}
+td{height:52px;border-bottom:1px solid var(--line);color:var(--muted)}
+td:first-child{color:var(--text);font-weight:500}
+tbody tr{transition:background .1s}
+tbody tr:hover{background:var(--hover)}
+.r{text-align:right}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--text);margin-right:8px}
+.dot.off{background:var(--bar)}
+.foot{margin-top:96px;color:var(--dim);font-size:13px}
+.rise{opacity:0;transform:translateY(8px);animation:rise .2s var(--ease) forwards}
+@keyframes rise{to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.rise{opacity:1;transform:none}}
+@media (max-width:860px){
+  .bar-in{padding:0 16px;gap:16px}.brand span{display:none}
+  .page{padding:40px 20px 64px}
+  .split,.lower{grid-template-columns:1fr;gap:48px}.lower{margin-top:64px}
+  .bars{gap:8px;height:150px}.labels{gap:8px}
+  th:nth-child(2),td:nth-child(2){display:none}
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-in">
+    <div class="brand"><i>Σ</i><span>Sigma</span></div>
+    <nav class="tabs" id="tabs" aria-label="Main">
+      <span class="u" id="u"></span>
+      <button aria-current="page">Overview</button><button>Employees</button><button>Leave</button><button>Attendance</button><button>Payroll</button><button>Reports</button>
+    </nav>
+    <div class="tools">
+      <button class="ghost" id="theme" aria-label="Switch between light and dark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M5 5l1.4 1.4M17.6 17.6L19 19M3 12h2M19 12h2M5 19l1.4-1.4M17.6 6.4L19 5"/></svg></button>
+      <span class="av" title="Hanna Hussain">HH</span>
+    </div>
+  </div>
+</header>
+
+<main class="page">
+  <section class="rise">
+    <div class="eyebrow"><b id="period">Net payroll, October</b><span>·</span><span id="sub">9 people paid</span></div>
+    <div class="hero num" id="hero">PKR 326,100</div>
+    <div class="delta"><span id="dlt"><b>Up 12.4%</b> on September</span><span>Closes in <b>6 days</b></span></div>
+  </section>
+
+  <section class="split rise" style="animation-delay:50ms">
+    <div>
+      <div class="bars" id="bars" aria-label="Net payroll by month"></div>
+      <div class="labels" id="labels"></div>
+    </div>
+    <div class="facts">
+      <div class="fact"><b class="num">8 of 9</b><span>clocked in today</span></div>
+      <div class="fact"><b class="num" id="wait">3</b><span>leave requests waiting</span></div>
+      <div class="fact"><b class="num">7.5</b><span>team KPI average, out of 10</span></div>
+    </div>
+  </section>
+
+  <section class="lower rise" style="animation-delay:100ms">
+    <div>
+      <div class="sh"><h2>Waiting for you</h2><button class="btn primary" id="all">Approve all</button></div>
+      <ul class="leave" id="leave"></ul>
+    </div>
+    <div>
+      <div class="sh"><h2>People</h2><span style="color:var(--dim);font-size:14px">9 in total</span></div>
+      <table id="tbl">
+        <thead><tr>
+          <th><button data-k="0">Name<svg class="ar" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 7V1M1 3.5L4 1l3 2.5"/></svg></button></th>
+          <th><button data-k="1">Department<svg class="ar" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 7V1M1 3.5L4 1l3 2.5"/></svg></button></th>
+          <th class="r"><button data-k="3">Salary<svg class="ar" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 7V1M1 3.5L4 1l3 2.5"/></svg></button></th>
+          <th class="r">Status</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+  <p class="foot">Sample data for design review. Not connected to the app.</p>
+</main>
+
+<script>
+(function(){
+var $=function(s,r){return (r||document).querySelector(s)},$$=function(s,r){return [].slice.call((r||document).querySelectorAll(s))};
+var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* tabs */
+var tabs=$('#tabs'),u=$('#u');
+function moveU(b){u.style.width=(b.offsetWidth-24)+'px';u.style.transform='translateX('+(b.offsetLeft+12)+'px)'}
+tabs.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;$$('button',tabs).forEach(function(x){x.removeAttribute('aria-current')});b.setAttribute('aria-current','page');moveU(b)});
+moveU($('button[aria-current=page]',tabs));
+addEventListener('resize',function(){moveU($('button[aria-current=page]',tabs))});
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){moveU($('button[aria-current=page]',tabs))});
+
+/* theme */
+$('#theme').addEventListener('click',function(){var d=document.documentElement;d.dataset.theme=d.dataset.theme==='dark'?'light':'dark'});
+
+/* bars drive the headline */
+var L=['May','Jun','Jul','Aug','Sep','Oct'],V=[212100,240300,228400,276200,301000,326100],PEOPLEPAID=[7,8,8,9,9,9];
+var bars=$('#bars'),labels=$('#labels'),max=340000,cols=[];
+labels.innerHTML=L.map(function(l){return '<span>'+l+'</span>'}).join('');
+V.forEach(function(v,i){var c=document.createElement('div');c.className='col'+(i===5?' on':'');c.tabIndex=0;c.setAttribute('aria-label',L[i]+': PKR '+v.toLocaleString('en-US'));
+ var h=Math.round(v/max*180);c.innerHTML='<span class="v" style="bottom:'+(h+8)+'px">'+Math.round(v/1000)+'k</span><div class="b" style="height:'+h+'px"></div>';bars.appendChild(c);cols.push(c);
+ var enter=function(){pick(i)},leave=function(){pick(5)};c.addEventListener('pointerenter',enter);c.addEventListener('focus',enter);c.addEventListener('pointerleave',leave);c.addEventListener('blur',leave)});
+var hero=$('#hero');
+function pick(i){cols.forEach(function(c,n){c.classList.toggle('on',n===i)});hero.textContent='PKR '+V[i].toLocaleString('en-US');$('#period').textContent='Net payroll, '+({May:'May',Jun:'June',Jul:'July',Aug:'August',Sep:'September',Oct:'October'}[L[i]]);$('#sub').textContent=PEOPLEPAID[i]+' people paid';
+ var d=i===0?null:Math.round((V[i]/V[i-1]-1)*1000)/10;$('#dlt').innerHTML=d===null?'<b>First month shown</b>':'<b>'+(d>=0?'Up ':'Down ')+Math.abs(d)+'%</b> on '+({May:'May',Jun:'June',Jul:'July',Aug:'August',Sep:'September'}[L[i-1]])}
+if(!reduce){cols.forEach(function(c,i){var b=$('.b',c);b.animate([{transform:'scaleY(0)'},{transform:'scaleY(1)'}],{duration:260,delay:80+i*30,easing:'cubic-bezier(.2,.8,.2,1)',fill:'backwards'})});
+ var t0=performance.now();(function f(n){var k=Math.min(1,(n-t0)/650),e=1-Math.pow(1-k,3);if(!hero.dataset.hover)hero.textContent='PKR '+Math.round(V[5]*e).toLocaleString('en-US');if(k<1)requestAnimationFrame(f)})(t0)}
+
+/* leave */
+var LEAVE=[['Sara Ali','Annual leave, 12 to 14 November'],['Bilal Raza','Sick leave, 20 November'],['Tariq Tahir','Casual leave, 25 November']];
+var ul=$('#leave'),n=3;
+ul.innerHTML=LEAVE.map(function(l){return '<li class="lv"><div><b>'+l[0]+'</b><span>'+l[1]+'</span></div><button class="t" data-a="no">Decline</button><button class="t" data-a="ok" style="color:var(--text)">Approve</button></li>'}).join('');
+function done(li){if(li.classList.contains('gone'))return;li.classList.add('gone');n--;$('#wait').textContent=n;if(!n){$('#all').disabled=true;var d=document.createElement('li');d.className='none';d.textContent='All caught up. Nothing is waiting for you.';ul.appendChild(d)}}
+ul.addEventListener('click',function(e){var b=e.target.closest('[data-a]');if(b)done(b.closest('.lv'))});
+$('#all').addEventListener('click',function(){$$('.lv:not(.gone)',ul).forEach(function(li,i){setTimeout(function(){done(li)},reduce?0:i*80)})});
+
+/* people, sortable */
+var P=[['Hanna Hussain','Administration','HR lead',90000,1],['Maya Mirza','Engineering','Engineering manager',150000,1],['Tariq Tahir','Engineering','Team lead',110000,1],['Esha Employee','Engineering','Developer III',80000,1],['Bilal Raza','Engineering','Developer II',72000,1],['Sara Ali','Administration','Coordinator',64000,1],['Usman Sheikh','Engineering','QA analyst',68000,1],['Amna Tariq','Administration','Accountant',70000,1],['Zara Hussain','Administration','Designer',76000,0]];
+var tb=$('#tbl tbody'),sortK=null,dir='asc';
+function render(){var rows=P.slice();if(sortK!==null)rows.sort(function(a,b){var x=a[sortK],y=b[sortK],r=typeof x==='number'?x-y:String(x).localeCompare(y);return dir==='asc'?r:-r});
+ tb.innerHTML=rows.map(function(p){return '<tr><td>'+p[0]+'</td><td>'+p[1]+'</td><td class="r num">PKR '+p[3].toLocaleString('en-US')+'</td><td class="r"><span class="dot'+(p[4]?'':' off')+'"></span>'+(p[4]?'Active':'Inactive')+'</td></tr>'}).join('')}
+render();
+$$('#tbl th button').forEach(function(b){b.addEventListener('click',function(){var k=+b.dataset.k;dir=(sortK===k&&dir==='asc')?'desc':'asc';sortK=k;$$('#tbl th button').forEach(function(x){x.removeAttribute('data-s')});b.setAttribute('data-s',dir);render()})});
+})();
+</script>
+</body>
+</html>
