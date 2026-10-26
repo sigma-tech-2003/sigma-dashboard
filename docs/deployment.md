@@ -25,12 +25,14 @@ Browser -> Vercel (React app, https://<project>.vercel.app)
 
 ## One-time setup
 
-1. **Neon**: create a project (region Singapore), copy the connection string, put it in `backend/.env` as
-   `DATABASE_URL=` with `DATABASE_SSL=true`. `backend/.env` is gitignored.
-2. **Migrate and seed** (from `backend/`): `npm run db:migrate`, then
-   `npm run db:seed-demo -- --confirm-database=<database name in the Neon string>`.
-   The seed refuses a database that already has a company or users, and it writes the five logins to
-   `backend/exports/demo-credentials.txt` (gitignored).
+1. **Neon**: create a project (region Singapore) and copy the connection string (the direct one, not the pooled
+   one). Save it as a single line in `backend/exports/neon-url.txt`. That folder is gitignored, and keeping it out of
+   `backend/.env` means your local backend keeps using your local database.
+2. **Migrate and seed**, from `backend/`, with the string supplied for these two commands only:
+   `DATABASE_URL="$(cat exports/neon-url.txt)" DATABASE_SSL=true npm run db:migrate`, then
+   `DATABASE_URL="$(cat exports/neon-url.txt)" DATABASE_SSL=true npm run db:seed-demo -- --confirm-database=<database name in the string>`.
+   (dotenv never overrides a variable that is already set.) The seed refuses a database that already has a company
+   or users, and writes the five logins to `backend/exports/demo-credentials.txt` (gitignored).
 3. **Render**: New > Blueprint > pick this repo and the `migration/postgres` branch. Paste Neon's string as
    `DATABASE_URL` when asked. `AUTH_TOKEN_SECRET` is generated for you. Confirm the service URL is
    `https://sigma-hrm-api.onrender.com`; if Render gave it another name, change the destination in `vercel.json`.
