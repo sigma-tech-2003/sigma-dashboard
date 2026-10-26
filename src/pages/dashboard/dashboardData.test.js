@@ -48,6 +48,26 @@ test("presence: leave and absent today count as out; yesterday's record does not
   assert.equal(counts.not, 2);
 });
 
+test("presence: approved leave covering today puts someone with no record of their own out; a record, or pending leave, does not", () => {
+  const covering = (empId, status) => ({ id: `x-${empId}`, empId, type: "Sick", start: "2026-10-25", end: "2026-10-27", status });
+  const noRecords = presenceToday(E, [], now, [covering("b", "approved"), covering("e", "pending")]);
+  assert.equal(noRecords.people.find((p) => p.employee.id === "b").state, "out");
+  assert.equal(noRecords.people.find((p) => p.employee.id === "b").status, "leave");
+  assert.equal(noRecords.people.find((p) => p.employee.id === "e").state, "not", "waiting for a decision is not away");
+  const clockedIn = presenceToday(E, attendance, now, [covering("h", "approved")]);
+  assert.equal(clockedIn.people.find((p) => p.employee.id === "h").state, "in", "someone who clocked in is in, whatever the leave says");
+  const ended = presenceToday(E, [], now, [{ ...covering("b", "approved"), start: "2026-10-20", end: "2026-10-25" }]);
+  assert.equal(ended.people.find((p) => p.employee.id === "b").state, "not", "leave that ended yesterday does not count");
+});
+
+test("payroll: a month with nothing processed yet has no change to report against last month", () => {
+  const draftsOnly = [
+    { empId: "h", month: "September", year: 2026, status: "processed", net: 80 },
+    { empId: "h", month: "October", year: 2026, status: "draft", net: 100 },
+  ];
+  assert.equal(payrollSnapshot(draftsOnly, now).changePct, null);
+});
+
 test("week ahead: five working days from today, today from real clock-ins, later days from approved leave", () => {
   const presence = presenceToday(E, attendance, now);
   const week = weekAhead(E, leaves, presence, now);

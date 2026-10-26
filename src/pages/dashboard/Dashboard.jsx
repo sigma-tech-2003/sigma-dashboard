@@ -68,7 +68,7 @@ const ManagementDashboard = (props) => {
     ...(payrollItem ? [payrollItem] : []),
   ];
 
-  const presence = presenceToday(scope.employees, scope.attendance, now);
+  const presence = presenceToday(scope.employees, scope.attendance, now, scope.leaves);
   const week = weekAhead(scope.employees, scope.leaves, presence, now);
   const calendar = awayCalendar(scope.leaves, scope.employees, now);
   const people = peopleSnapshot(scope.employees, now);

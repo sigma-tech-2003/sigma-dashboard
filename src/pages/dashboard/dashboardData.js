@@ -21,15 +21,26 @@ const nameOf = (employee) => employee?.name || employee?.email || "Unnamed emplo
 
 // ---- Here today ---------------------------------------------------------------------------------------------------
 
+const coversDay = (leave, iso) => {
+  const from = attendanceDateValue(leave.start);
+  const to = attendanceDateValue(leave.end) || from;
+  return Boolean(from) && from <= iso && to >= iso;
+};
+
 // Each active person, and whether they are in, out (leave or absent) or not yet in, from today's latest attendance record.
-export const presenceToday = (employees, attendance, now) => {
+// Someone with approved leave today and no record of their own is away, not "not in yet"; a record always wins.
+export const presenceToday = (employees, attendance, now, leaves = []) => {
   const active = (Array.isArray(employees) ? employees : []).filter(isActive);
   const ids = new Set(active.map((employee) => String(employee.id)));
-  const records = new Map(latestAttendanceRecords(attendance, ids, isoOf(now)).map((record) => [String(record.empId), record]));
+  const todayIso = isoOf(now);
+  const records = new Map(latestAttendanceRecords(attendance, ids, todayIso).map((record) => [String(record.empId), record]));
+  const onLeave = new Set((Array.isArray(leaves) ? leaves : [])
+    .filter((leave) => normalizeAttendanceStatus(leave.status) === "approved" && coversDay(leave, todayIso))
+    .map((leave) => String(leave.empId)));
 
   const people = active.map((employee) => {
     const record = records.get(String(employee.id));
-    const status = record ? normalizeAttendanceStatus(record.status) : "";
+    const status = record ? normalizeAttendanceStatus(record.status) : onLeave.has(String(employee.id)) ? "leave" : "";
     const state = status === "present" || status === "late" ? "in" : status === "leave" || status === "absent" ? "out" : "not";
     return { employee, state, status: status || null, late: status === "late", checkIn: record?.checkIn || "" };
   });
@@ -49,11 +60,7 @@ export const weekAhead = (employees, leaves, presence, now, count = 5) => {
     const day = addDays(now, offset);
     if (day.getDay() === 0 || day.getDay() === 6) continue;
     const iso = isoOf(day);
-    const away = new Set(approved.filter((leave) => {
-      const from = attendanceDateValue(leave.start);
-      const to = attendanceDateValue(leave.end) || from;
-      return from && from <= iso && to >= iso;
-    }).map((leave) => String(leave.empId)));
+    const away = new Set(approved.filter((leave) => coversDay(leave, iso)).map((leave) => String(leave.empId)));
     const awayActive = active.filter((employee) => away.has(String(employee.id))).length;
     out.push({
       iso,
@@ -181,7 +188,7 @@ export const payrollSnapshot = (payroll, now) => {
     processed: processed.length,
     drafts: drafts.length,
     stage: drafts.length ? "review" : processed.length ? "done" : "none",
-    changePct: previous > 0 ? Math.round((total / previous - 1) * 1000) / 10 : null,
+    changePct: processed.length > 0 && previous > 0 ? Math.round((total / previous - 1) * 1000) / 10 : null,
   };
 };
 

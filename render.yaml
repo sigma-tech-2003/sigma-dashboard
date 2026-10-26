@@ -1,0 +1,28 @@
+# Render blueprint for the API (Express + PostgreSQL client). The database is NOT created here: it lives on Neon,
+# and its connection string is the one value you paste in the Render dashboard (DATABASE_URL, sync: false).
+# The browser never calls this host directly: Vercel rewrites /api/* to it (see vercel.json, decision D36).
+services:
+  - type: web
+    name: sigma-hrm-api
+    runtime: node
+    plan: free
+    region: singapore        # keep next to the Neon project (also Singapore) so each query is a short hop
+    branch: migration/postgres
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production    # makes the refresh cookie Secure
+      - key: COMPANY_TIMEZONE
+        value: Asia/Karachi
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DATABASE_URL
+        sync: false          # paste Neon's connection string; never commit it
+      - key: AUTH_TOKEN_SECRET
+        generateValue: true  # Render creates a long random value and keeps it
