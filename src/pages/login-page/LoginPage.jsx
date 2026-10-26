@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 import { Briefcase } from "lucide-react";
 import Input from "../../components/input/Input";
 import Btn from "../../components/btn/Btn";
+import PageMotion from "../../components/page-motion/PageMotion";
 import FormFeedback from "../../components/form-feedback/FormFeedback";
 import { signIn, signOutUser } from "../../services/authService";
 import {
@@ -106,6 +107,7 @@ const LoginPage = () => {
 
   return (
     <div className="login-page">
+      <PageMotion>
       <div className="login-wrapper">
 
         <div className="login-header">
@@ -171,6 +173,7 @@ const LoginPage = () => {
         </form>
 
       </div>
+      </PageMotion>
     </div>
   );
 };

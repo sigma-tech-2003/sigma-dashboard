@@ -40,7 +40,7 @@ export const initials = (name) =>
 
 export const PROJECT_KPI_SCORE_MIN = 1;
 export const PROJECT_KPI_SCORE_MAX = 10;
-export const PROJECT_KPI_NOT_RATED_LABEL = "Not Rated";
+export const PROJECT_KPI_NOT_RATED_LABEL = "Not rated";
 export const PROJECT_KPI_RATING_LABELS = Object.freeze({
   POOR: "Poor",
   NEEDS_IMPROVEMENT: "Needs Improvement",

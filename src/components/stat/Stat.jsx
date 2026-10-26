@@ -19,7 +19,7 @@ const Stat = ({ icon: Icon, label, value, sub, color }) => {
         )}
       </div>
 
-      <div ref={valueRef} className="stat-value">{value}</div>
+      <div ref={valueRef} className={"stat-value" + (String(value).length > 7 ? " stat-value--long" : "")}>{value}</div>
 
       {sub && <div className="stat-sub">{sub}</div>}
     </div>

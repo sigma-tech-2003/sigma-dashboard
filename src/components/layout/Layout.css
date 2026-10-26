@@ -373,3 +373,47 @@
 .theme-segmented__option[aria-checked="true"] {
   background: transparent;
 }
+
+/* ---- People-first shell: warm sidebar, a white card that slides under the current page, a quiet top bar ---- */
+.sidebar {
+  width: 240px;
+}
+
+.logo-box {
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+}
+
+.sidebar-brand {
+  letter-spacing: -0.01em;
+}
+
+.nav-indicator {
+  background: var(--color-card);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+
+.nav-btn--active,
+.nav-btn--active:hover {
+  color: var(--color-text);
+  font-weight: var(--font-weight-medium);
+}
+
+.nav-btn--active svg {
+  color: var(--color-primary-text);
+}
+
+.topbar {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.breadcrumbs__item[aria-current="page"] {
+  color: var(--color-muted-light);
+  font-weight: var(--font-weight-regular, 400);
+}
+
+/* Nothing inside a page may make the page itself scroll sideways (wide tables scroll in their own container) */
+.content {
+  overflow-x: hidden;
+}

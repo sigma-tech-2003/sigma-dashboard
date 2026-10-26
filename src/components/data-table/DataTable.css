@@ -16,7 +16,7 @@
 }
 
 .data-table th {
-  padding: var(--space-3) var(--space-6);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   color: var(--color-muted-light);
   font-size: var(--font-size-xs);
@@ -27,7 +27,7 @@
 
 .data-table td {
   height: var(--row-h);
-  padding: var(--space-2) var(--space-6);
+  padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text);
   vertical-align: middle;
@@ -59,13 +59,15 @@
 }
 
 .data-table .cell-truncate {
-  max-width: 220px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .data-table .cell-number {
+  padding-right: var(--space-3);
+  padding-left: var(--space-3);
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -202,4 +204,31 @@
 
 .has-row-highlight tbody tr:hover {
   background: transparent;
+}
+
+/* A row that was just acted on (a leave decision) glows in the accent for a moment, then settles */
+.row-flash td {
+  animation: rowFlash 1.2s var(--ease-out);
+}
+
+@keyframes rowFlash {
+  0% {
+    background: var(--color-primary-glow);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* Table edges line up with the card's own padding (not on a phone, where rows are cards) */
+@media (min-width: 640px) {
+  .data-table th:first-child,
+  .data-table td:first-child {
+    padding-left: var(--space-8);
+  }
+
+  .data-table th:last-child,
+  .data-table td:last-child {
+    padding-right: var(--space-8);
+  }
 }

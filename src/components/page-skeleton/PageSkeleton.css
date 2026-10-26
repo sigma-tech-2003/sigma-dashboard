@@ -11,3 +11,64 @@
   gap: var(--space-6);
   margin-bottom: var(--space-9);
 }
+
+/* The dashboard's shape */
+.sk-title {
+  margin: var(--space-4) 0 var(--space-6);
+}
+
+.sk-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--space-8);
+  margin-top: var(--space-10);
+}
+
+.sk-4 { grid-column: span 4; }
+.sk-5 { grid-column: span 5; }
+.sk-7 { grid-column: span 7; }
+.sk-12 { grid-column: span 12; }
+
+.sk-lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
+
+.sk-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.sk-line__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sk-big {
+  margin: var(--space-6) 0 var(--space-4);
+}
+
+.sk-faces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+}
+
+.sk-cal {
+  margin-top: var(--space-6);
+}
+
+@media (max-width: 1100px) {
+  .sk-5, .sk-7, .sk-12 { grid-column: span 12; }
+  .sk-4 { grid-column: span 6; }
+}
+
+@media (max-width: 720px) {
+  .sk-4 { grid-column: span 12; }
+}

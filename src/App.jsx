@@ -220,6 +220,7 @@ function AuthenticatedWorkspace({
     updateDepartment,
     deleteDepartment,
     dataErrors,
+    navigate,
   };
 
   return (
@@ -231,9 +232,9 @@ function AuthenticatedWorkspace({
         onLogout={onLogout}
       >
         {loading ? (
-          <PageSkeleton label="Loading data" />
+          <PageSkeleton label="Loading data" variant={activeRoute.id === "dashboard" ? "dashboard" : "page"} />
         ) : (
-          <Suspense fallback={<PageSkeleton label="Loading page" />}>
+          <Suspense fallback={<PageSkeleton label="Loading page" variant={activeRoute.id === "dashboard" ? "dashboard" : "page"} />}>
             <PageMotion key={activeRoute.id}>
               <Page {...sharedProps} />
             </PageMotion>

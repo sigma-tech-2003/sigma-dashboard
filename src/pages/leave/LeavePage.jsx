@@ -31,6 +31,7 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, cancelLeave, employees
   const [applying,      setApplying]      = useState(false);
   const [decisionError, setDecisionError] = useState("");   // above the table (approve / reject / cancel)
   const [deciding,      setDeciding]      = useState(false);
+  const [flash,         setFlash]         = useState(null); // the row just decided, highlighted for a moment
   const [cancelling,    setCancelling]    = useState(null); // the request awaiting "Cancel this request?" confirmation
 
   const canApproveLeave = can(user, "approveLeave");
@@ -82,7 +83,11 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, cancelLeave, employees
     const result = await guardedSave(() => updateLeaveStatus(id, status), { fallback: "The decision could not be saved. Please try again." });
     setDeciding(false);
     if (!result.ok) setDecisionError(result.message);
-    else toast.success(status === "approved" ? "Leave approved" : "Leave rejected");
+    else {
+      toast.success(status === "approved" ? "Leave approved" : "Leave rejected");
+      setFlash(id);
+      setTimeout(() => setFlash((current) => (current === id ? null : current)), 1400);
+    }
   };
 
   // An employee withdrawing their own pending request. The server refuses it if it was decided in the meantime.
@@ -147,17 +152,19 @@ const LeavePage = ({ leaves, addLeave, updateLeaveStatus, cancelLeave, employees
             const emp = employees.find(e => e.id === l.empId);
             const mine = String(l.empId) === String(user.id);
             return (
-              <tr key={l.id}>
+              <tr key={l.id} className={flash === l.id ? "row-flash" : undefined}>
                 {canApproveLeave && <td data-primary><PersonCell emp={emp} /></td>}
                 <td data-label="Type" {...(!canApproveLeave && { "data-primary": true })} style={{ fontWeight: 500 }}>{l.type}</td>
-                <td data-label="Period" style={{ whiteSpace: "nowrap" }}>{fdate(l.start)} → {fdate(l.end)}</td>
+                <td data-label="Period">{fdate(l.start)} → {fdate(l.end)}</td>
                 <td data-label="Days" className="cell-number">{l.days}</td>
                 <td data-label="Reason" className="cell-truncate" title={l.reason} style={{ color: T.mutedLight }}>{l.reason}</td>
                 <td data-label="Applied" style={{ whiteSpace: "nowrap", color: T.mutedLight }}>{fdate(l.applied)}</td>
                 <td data-label="Status"><Badge s={l.status} /></td>
                 {canApproveLeave ? (
                   <td className="cell-actions">
-                    {l.status === "pending" ? (
+                    {l.status === "pending" && mine ? (
+                      <span style={{ color: T.muted, fontSize: 12 }}>Your own request</span>
+                    ) : l.status === "pending" ? (
                       <div className="row-actions">
                         <IconButton icon={Check} label={`Approve leave for ${emp?.name || "employee"}`} onClick={() => decide(l.id, "approved")} disabled={deciding} />
                         <IconButton icon={X} variant="danger" label={`Reject leave for ${emp?.name || "employee"}`} onClick={() => decide(l.id, "rejected")} disabled={deciding} />

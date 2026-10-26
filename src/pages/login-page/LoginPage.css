@@ -30,12 +30,14 @@
   color: var(--color-white);
 }
 
+
 .login-title {
   color: var(--color-text);
-  font-size: var(--font-size-4xl);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: -0.02em;
-  line-height: var(--line-height-tight);
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
 }
 
 .login-title span {
@@ -63,8 +65,10 @@
 .login-heading {
   margin-bottom: var(--space-6);
   color: var(--color-text);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
 }
 
 .login-lede {
@@ -134,4 +138,10 @@
   .login-card {
     padding: var(--space-6);
   }
+}
+
+/* PageMotion wraps the card for its entrance; it has to be as wide as the card */
+.login-page > .page-motion {
+  width: 100%;
+  max-width: 420px;
 }

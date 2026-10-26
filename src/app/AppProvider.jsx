@@ -15,13 +15,13 @@ const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
 const LEGACY_AUTH_ROLE_STORAGE_KEY = "sigma-selected-role";
 
 const normalizeThemePreference = (preference) =>
-  THEME_PREFERENCES.includes(preference) ? preference : "dark";
+  THEME_PREFERENCES.includes(preference) ? preference : "system";
 
 const getStoredThemePreference = () => {
   try {
     return normalizeThemePreference(window.localStorage.getItem(THEME_STORAGE_KEY));
   } catch {
-    return "dark";
+    return "system";
   }
 };
 

@@ -20,3 +20,7 @@
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
 }
+
+/* A card that can be pressed or hovered gives back: it lifts a hair and its edge firms up */
+.card--interactive{transition:transform var(--dur-base) var(--ease-out),box-shadow var(--dur-base) var(--ease-out),border-color var(--dur-fast)}
+.card--interactive:hover{transform:translateY(-2px);box-shadow:var(--shadow-lift);border-color:var(--color-border-light)}

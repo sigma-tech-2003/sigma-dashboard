@@ -8,6 +8,7 @@ import { useRef, useState } from "react";
 import { Briefcase } from "lucide-react";
 import Input from "../../components/input/Input";
 import Btn from "../../components/btn/Btn";
+import PageMotion from "../../components/page-motion/PageMotion";
 import FormFeedback from "../../components/form-feedback/FormFeedback";
 import { useApp } from "../../app/index.js";
 import { PasswordChangeError, changeOwnPassword } from "../../services/authService";
@@ -45,6 +46,7 @@ const ChangePasswordPage = () => {
 
   return (
     <div className="login-page">
+      <PageMotion>
       <div className="login-wrapper">
 
         <div className="login-header">
@@ -108,6 +110,7 @@ const ChangePasswordPage = () => {
         </form>
 
       </div>
+      </PageMotion>
     </div>
   );
 };

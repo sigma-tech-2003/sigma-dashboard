@@ -8,6 +8,16 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Set the theme before first paint so a dark preference never flashes light (AppProvider keeps it in sync after).
+      (function () {
+        try {
+          var pref = localStorage.getItem("sigma-hrm-theme");
+          var dark = pref === "dark" || ((pref !== "light") && matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+        } catch (e) {}
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

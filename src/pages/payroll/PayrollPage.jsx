@@ -136,7 +136,7 @@ const PayrollPageContent = ({ payroll, addPayroll, updatePayrollStatus, employee
             return (
               <tr key={p.id}>
                 <td data-primary><PersonCell emp={emp} sub={emp?.dept} /></td>
-                <td data-label="Period" style={{ whiteSpace: "nowrap" }}>{p.month} {p.year}</td>
+                <td data-label="Period">{p.month} {p.year}</td>
                 <td data-label="Basic" className="cell-number">{fmt(p.basic)}</td>
                 <td data-label="Allowances" className="cell-number">{fmt(p.allowances)}</td>
                 <td data-label="Bonus" className="cell-number" style={{ color: p.bonus ? T.success : T.muted }}>{fmt(p.bonus)}</td>

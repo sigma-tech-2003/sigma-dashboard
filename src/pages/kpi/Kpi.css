@@ -148,3 +148,23 @@
   color: var(--color-danger);
   font-size: var(--font-size-xs);
 }
+
+/* Cards give back when you point at them: a hair of lift and a firmer edge */
+.kpi-card,
+.kpi-summary__card {
+  transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), border-color var(--dur-fast);
+}
+
+.kpi-card:hover,
+.kpi-summary__card:hover {
+  border-color: var(--color-border-light);
+  box-shadow: var(--shadow-lift);
+  transform: translateY(-2px);
+}
+
+.kpi-card__pct,
+.kpi-summary__score {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.03em;
+}

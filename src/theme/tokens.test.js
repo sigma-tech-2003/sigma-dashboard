@@ -15,8 +15,8 @@ const block = (selector) => {
 };
 const declarations = (text) => Object.fromEntries([...text.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
 
-const dark = declarations(block(":root"));
-const light = { ...dark, ...declarations(block(':root[data-theme="light"]')) };
+const light = declarations(block(":root"));
+const dark = { ...light, ...declarations(block(':root[data-theme="dark"]')) };
 
 const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 const lum = (hex) => {
@@ -92,19 +92,19 @@ test("text hierarchy is real: in both themes text, secondary and tertiary are th
 });
 
 test("the dark and light themes define the same set of tokens (no token exists in only one)", () => {
-  const lightOnly = Object.keys(declarations(block(':root[data-theme="light"]'))).filter((n) => !(n in dark));
-  assert.deepEqual(lightOnly, [], "light overrides only tokens that exist in the default block");
+  const darkOnly = Object.keys(declarations(block(':root[data-theme="dark"]'))).filter((n) => !(n in light));
+  assert.deepEqual(darkOnly, [], "dark overrides only tokens that exist in the default (light) block");
 });
 
 test("type and spacing follow the scale: 12px floor, 14px body, 4px grid, weights capped at 600", () => {
-  assert.equal(dark["font-size-xs"], "12px");
-  assert.equal(dark["font-size-md"], "14px");
-  assert.equal(dark["font-weight-extrabold"], "600");
+  assert.equal(light["font-size-xs"], "12px");
+  assert.equal(light["font-size-md"], "14px");
+  assert.equal(light["font-weight-extrabold"], "600");
   for (const step of ["space-1", "space-2", "space-4", "space-6", "space-9", "space-10", "space-11"]) {
-    assert.equal(parseInt(dark[step], 10) % 4, 0, `${step} (${dark[step]}) sits on the 4px grid`);
+    assert.equal(parseInt(light[step], 10) % 4, 0, `${step} (${light[step]}) sits on the 4px grid`);
   }
   for (const size of ["xs", "sm", "md", "lg", "xl", "2xl", "3xl", "4xl", "5xl"]) {
-    assert.ok(parseInt(dark[`font-size-${size}`], 10) >= 12, `font-size-${size} is not below 12px`);
+    assert.ok(parseInt(light[`font-size-${size}`], 10) >= 12, `font-size-${size} is not below 12px`);
   }
 });
 
@@ -114,7 +114,7 @@ test("every colour in T is a var() reference to a token that exists in tokens.cs
   for (const [key, value] of Object.entries(T)) {
     const match = /^var\(--(color-[a-z-]+)\)$/.exec(value);
     assert.ok(match, `T.${key} is a var() reference (got ${value})`);
-    assert.ok(match[1] in dark, `T.${key} -> --${match[1]} is defined in tokens.css`);
+    assert.ok(match[1] in light, `T.${key} -> --${match[1]} is defined in tokens.css`);
   }
 });
 

@@ -5,6 +5,10 @@ import { gsap, ScrollTrigger, useGsap } from "./useGsap";
 // What a page animates when it arrives: its heading, stat cards, filters and first table or card grid.
 const ENTRANCE_SELECTOR = [
   ".page-header",
+  ".login-header",
+  ".login-card",
+  ".dash-date",
+  ".dash-lede",
   ".stat-grid > *",
   ".filter-bar",
   ".data-table-container",
@@ -35,6 +39,12 @@ export const usePageMotion = (scopeRef) => {
     const outermost = candidates.filter((element) => !candidates.some((other) => other !== element && other.contains(element)));
     const picked = pickAboveFold(outermost.map((element) => element.getBoundingClientRect().top), viewportBottom, MAX_ENTRANCE_TARGETS);
 
+    // A page with a greeting (the dashboard) brings its words in one after another first; the rest follows them.
+    const words = [...root.querySelectorAll("[data-word]")];
+    if (words.length > 0) {
+      gsap.from(words, { opacity: 0, y: DISTANCE.rise * 2, duration: DURATION.slow, ease: EASE.out, stagger: STAGGER.base + 0.02, clearProps: "opacity,transform" });
+    }
+
     if (picked.length > 0) {
       gsap.from(picked.map((index) => outermost[index]), {
         opacity: 0,
@@ -42,6 +52,7 @@ export const usePageMotion = (scopeRef) => {
         duration: DURATION.entrance,
         ease: EASE.out,
         stagger: STAGGER.tight,
+        delay: words.length > 0 ? 0.2 : 0,
         clearProps: "opacity,transform",
       });
     }
